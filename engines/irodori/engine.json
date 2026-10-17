@@ -6,6 +6,7 @@
   "homepage": "https://github.com/Aratako/Irodori-TTS",
   "license": "Code MIT. Check each model card for weight licenses.",
   "languages": ["Japanese"],
+  "reading": "ja",
   "reference": {
     "transcript": "unused",
     "multi_clip": true,
@@ -325,6 +326,24 @@
         "increase": "Longer references add more speaker evidence, with diminishing returns after about 30 s.",
         "decrease": "Shorter references are faster to process but capture less of the voice.",
         "tip": "Clip order matters. Put your best clip first."
+      }
+    },
+    {
+      "key": "reading_conversion", "label": "Reading conversion", "type": "bool", "scope": "generate", "group": "Advanced", "default": true,
+      "help": {
+        "summary": "Rewrites English words, acronyms and your dictionary entries as katakana before the text reaches the model, so that Irodori-TTS reads them like a Japanese speaker would (Graphical User Interface becomes グラフィカルユーザーインターフェース, GUI becomes ジーユーアイ). The Reading box under the text shows the result and lets you change any word.",
+        "increase": "On reads mixed Japanese and English text naturally. Irodori-TTS was trained on Japanese text only and garbles raw English.",
+        "decrease": "Off sends the text exactly as typed.",
+        "tip": "Click a word in the Reading box to pick another reading or save it to the dictionary. Manage the dictionary in Models > Reading."
+      }
+    },
+    {
+      "key": "reading_context", "label": "Context model (d1)", "type": "bool", "scope": "generate", "group": "Advanced", "default": true,
+      "help": {
+        "summary": "Lets the d1-omni-600M decision model choose between readings that depend on context, such as sake (サケ or セイク), live (ライブ or リブ) and No. (ナンバー or ノー). It runs on the CPU, so it never takes VRAM from the TTS model.",
+        "increase": "On picks the reading from the whole sentence. The first use loads the model in about 5 to 10 s.",
+        "decrease": "Off always uses the most common reading. Only these words are affected, everything else is converted the same way.",
+        "tip": "Set it up once in Models > Reading (about 2.4 GB). It is right roughly 4 times out of 5, so check the highlighted words in the Reading box."
       }
     },
     {

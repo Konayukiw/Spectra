@@ -137,12 +137,18 @@ const S = {
   pinnedHelp: null,
   helpAnchor: null,
   asr: null,
+  reading: null,
+  readingDict: [],
+  readingResult: null,
+  readingStale: false,
+  readingOverrides: store.get("readingOverrides", {}),
+  preparing: false,
 };
 
 const GROUP_ORDER = ["Model", "Basic", "Sampling", "Guidance", "Duration", "Reference", "Advanced"];
 const TRANSCRIPT_LABEL = { required: "Transcript (required)", recommended: "Transcript (recommended)", optional: "Transcript (optional)" };
 const TEXT_HINTS = {
-  irodori: "Tip: emoji such as 😊 😭 🤭 😮‍💨 in the text can steer emotion and add non-verbal sounds on v4 models. The Emoji button lists every supported cue. Keep each generation to one or two sentences for the most natural result.",
+  irodori: "Tip: emoji such as 😊 😭 🤭 😮‍💨 in the text can steer emotion and add non-verbal sounds on v4 models. The Emoji button lists every supported cue. Keep each generation to one or two sentences for the most natural result. English words and acronyms are converted to katakana before generation. Click a word in the Reading box to change how it is read.",
   qwen3tts: "Tip: set Language to match the text. The reference may be in a different language (cross-lingual cloning).",
   voxcpm: "Tip: in 'Reference only' mode, the Style instruction setting controls emotion and speed while keeping the cloned timbre.",
 };
@@ -408,6 +414,7 @@ function renderControl(engine, spec, value) {
     markChanged();
     if (S.helpAnchor === wrap) refreshHelp();
     if (spec.scope === "load") renderModelMeta();
+    if (spec.key === "reading_conversion" || spec.key === "reading_context") scheduleReading(0);
   };
   if (spec.type === "bool") {
     wrap.innerHTML = `<div class="setting-label"><label for="${id}">${esc(spec.label)} ${reload}</label><label class="switch"><input type="checkbox" id="${id}"><span></span></label></div>`;
@@ -734,6 +741,339 @@ function renderAsr() {
   }
 }
 
+const READING_KIND = {
+  user: "Your dictionary",
+  dict: "Built-in dictionary",
+  letters: "Spelled out letter by letter",
+  auto: "Estimated by kanalizer",
+  context: "Depends on context",
+};
+
+function readingEnabled() {
+  const engine = currentEngine();
+  return !!(engine && engine.reading && engineSettings(engine.id).reading_conversion);
+}
+
+function readingContextOn() {
+  const engine = currentEngine();
+  return !!(engine && engineSettings(engine.id).reading_context);
+}
+
+function readingOverride(seg) {
+  return seg.key && Object.prototype.hasOwnProperty.call(S.readingOverrides, seg.key) ? S.readingOverrides[seg.key] : null;
+}
+
+function isConverted(seg) {
+  return seg.reading !== null && seg.reading !== undefined && seg.kind !== "gap";
+}
+
+function readingText(result) {
+  return result.segments.map((s) => (s.reading === null || s.reading === undefined ? s.text : readingOverride(s) ?? s.reading)).join("");
+}
+
+function usedOverrides(result) {
+  const used = {};
+  for (const seg of result.segments) {
+    const value = readingOverride(seg);
+    if (value !== null) used[seg.key] = value;
+  }
+  return used;
+}
+
+function saveOverrides() {
+  const keys = Object.keys(S.readingOverrides);
+  if (keys.length > 300) for (const key of keys.slice(0, keys.length - 300)) delete S.readingOverrides[key];
+  store.set("readingOverrides", S.readingOverrides);
+}
+
+let readingTimer = null;
+let readingSeq = 0;
+
+function scheduleReading(delay = 450) {
+  clearTimeout(readingTimer);
+  readingTimer = setTimeout(() => refreshReading().catch(() => {}), delay);
+}
+
+async function refreshReading() {
+  clearTimeout(readingTimer);
+  const text = $("#text-input").value.trim();
+  if (!readingEnabled() || !text) {
+    readingSeq++;
+    S.readingResult = null;
+    renderReading();
+    return null;
+  }
+  const context = readingContextOn();
+  const cached = S.readingResult;
+  if (cached && !S.readingStale && cached.source === text && cached.context.enabled === context) {
+    renderReading();
+    return cached;
+  }
+  const seq = ++readingSeq;
+  $("#reading-panel").classList.add("busy");
+  try {
+    let result = await api("/api/reading/convert", { method: "POST", body: { text, context: false } });
+    if (context) {
+      result.context.enabled = true;
+      if (result.context.words && result.context.available) {
+        if (seq !== readingSeq) return result;
+        S.readingResult = { ...result, context: { ...result.context, pending: true } };
+        renderReading();
+        result = await api("/api/reading/convert", { method: "POST", body: { text, context: true } });
+      }
+    }
+    if (seq === readingSeq) {
+      S.readingResult = result;
+      S.readingStale = false;
+      renderReading();
+    }
+    return result;
+  } catch (err) {
+    if (seq === readingSeq) $("#reading-status").textContent = `Could not convert: ${err.message}`;
+    throw err;
+  } finally {
+    if (seq === readingSeq) $("#reading-panel").classList.remove("busy");
+  }
+}
+
+function renderReading() {
+  const panel = $("#reading-panel");
+  const result = S.readingResult;
+  const converted = result ? result.segments.filter(isConverted) : [];
+  panel.hidden = !converted.length;
+  if (panel.hidden) return;
+  const body = $("#reading-body");
+  body.innerHTML = "";
+  result.segments.forEach((seg, index) => {
+    if (seg.kind === "gap") return;
+    if (!isConverted(seg)) {
+      body.appendChild(document.createTextNode(seg.text));
+      return;
+    }
+    const override = readingOverride(seg);
+    const shown = override ?? seg.reading;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `rd-seg ${seg.kind}${override !== null ? " edited" : ""}`;
+    btn.textContent = shown;
+    const source = override !== null ? "Edited by you" : seg.kind === "context" && seg.by === "context" ? `Chosen by context${seg.confidence ? ` (${Math.round(seg.confidence * 100)}%)` : ""}` : READING_KIND[seg.kind] || "";
+    btn.title = `${seg.text} → ${shown} · ${source}. Click to change.`;
+    btn.onclick = () => editReading(index);
+    body.appendChild(btn);
+  });
+  const ctx = result.context || {};
+  const parts = [`${converted.length} word${converted.length === 1 ? "" : "s"} converted`];
+  if (ctx.words) {
+    const plural = ctx.words === 1 ? "" : "s";
+    if (!ctx.enabled) parts.push(`context model off, ${ctx.words} word${plural} use the most common reading`);
+    else if (!ctx.available) parts.push(`${ctx.words} word${plural} use the most common reading. Set up the context model in Models > Reading`);
+    else if (ctx.pending) parts.push(`choosing ${ctx.words} word${plural} by context${ctx.loaded ? "" : ", loading the model first (up to about 30 s)"}`);
+    else if (ctx.error) parts.push(`the context model failed (${ctx.error})`);
+    else {
+      const load = !ctx.loaded && ctx.wall && ctx.elapsed !== null ? `, model loaded in ${fmtSec(ctx.wall - ctx.elapsed)}` : "";
+      parts.push(`${ctx.decided} chosen by ${ctx.label}${ctx.elapsed !== null && ctx.elapsed !== undefined ? ` in ${fmtSec(ctx.elapsed)}` : ""}${load}`);
+    }
+  }
+  const edited = converted.filter((s) => readingOverride(s) !== null).length;
+  if (edited) parts.push(`${edited} edited`);
+  $("#reading-status").textContent = parts.join(" · ");
+}
+
+async function editReading(index) {
+  const seg = S.readingResult?.segments[index];
+  if (!seg) return;
+  const override = readingOverride(seg);
+  const current = override ?? seg.reading;
+  const options = seg.kind === "context" ? seg.candidates : [{ reading: seg.reading, note: READING_KIND[seg.kind] || "" }];
+  const custom = !options.some((c) => c.reading === current);
+  const tag = (j) => {
+    if (seg.kind !== "context" || j !== seg.choice) return "";
+    if (seg.by === "context") return `<em>chosen by context${seg.confidence ? ` · ${Math.round(seg.confidence * 100)}%` : ""}</em>`;
+    return "<em>default</em>";
+  };
+  const radios = options.map((c, j) => `
+    <label class="rd-option"><input type="radio" name="rd-choice" value="${esc(c.reading)}" ${!custom && c.reading === current ? "checked" : ""}>
+      <span><strong>${esc(c.reading)}</strong>${c.note ? `<small>${esc(c.note)}</small>` : ""}${tag(j)}</span></label>`).join("");
+  const pending = modal({
+    title: `Reading of “${seg.text}”`,
+    body: `
+      <div class="rd-options">${radios}
+        <label class="rd-option"><input type="radio" name="rd-choice" value="__custom" ${custom ? "checked" : ""}>
+          <span><strong>Custom</strong><input type="text" id="rd-custom" value="${esc(custom ? current : "")}" placeholder="Type the reading, e.g. in katakana" maxlength="128" autocomplete="off"></span></label>
+      </div>
+      <label class="switch small rd-save"><input type="checkbox" id="rd-save"><span></span>Save to the dictionary for every text</label>`,
+    actions: [
+      { label: "Cancel", value: () => null },
+      ...(override !== null ? [{ label: "Reset", value: () => ({ reset: true }) }] : []),
+      {
+        label: "Apply",
+        primary: true,
+        value: (b) => {
+          const picked = b.querySelector('input[name="rd-choice"]:checked')?.value;
+          const reading = picked === "__custom" ? b.querySelector("#rd-custom").value.trim() : picked;
+          return { reading, save: b.querySelector("#rd-save").checked };
+        },
+      },
+    ],
+  });
+  const customInput = $("#rd-custom");
+  customInput.addEventListener("input", () => { $('#modal-body input[value="__custom"]').checked = true; });
+  const choice = await pending;
+  if (!choice) return;
+  if (choice.reset) {
+    delete S.readingOverrides[seg.key];
+    saveOverrides();
+    renderReading();
+    return;
+  }
+  if (!choice.reading) {
+    toast("Enter a reading.", "error");
+    return;
+  }
+  if (choice.save) {
+    try {
+      await api("/api/reading/dictionary", { method: "PUT", body: { word: seg.text, reading: choice.reading } });
+      delete S.readingOverrides[seg.key];
+      saveOverrides();
+      S.readingStale = true;
+      toast(`Saved “${seg.text}” as ${choice.reading} in the dictionary`, "ok");
+      await refreshReading().catch(() => {});
+      refreshReadingDict();
+    } catch (err) {
+      toast(err.message, "error");
+    }
+    return;
+  }
+  if (choice.reading === seg.reading) delete S.readingOverrides[seg.key];
+  else S.readingOverrides[seg.key] = choice.reading;
+  saveOverrides();
+  renderReading();
+}
+
+async function refreshReadingStatus() {
+  try {
+    S.reading = await api("/api/reading");
+  } catch {
+    S.reading = null;
+  }
+  renderReadingModel();
+}
+
+function renderReadingModel() {
+  const root = $("#reading-model-panel");
+  const r = S.reading;
+  if (!r) {
+    root.innerHTML = `<p class="muted">Reading status is unavailable.</p>`;
+    return;
+  }
+  const job = [...S.activeJobs.values()].find((j) => j.kind === "install" && j.meta.engine === "reading");
+  const badge = job ? `<span class="badge accent">setting up</span>`
+    : r.ready ? `<span class="badge ok">ready${r.loaded ? " · loaded" : ""}</span>`
+    : r.model === "incomplete" ? `<span class="badge warn">incomplete</span>`
+    : `<span class="badge">not installed</span>`;
+  root.innerHTML = `
+    <div class="engine">
+      <div class="engine-head"><strong>kanalizer ${esc(r.kanalizer)}</strong><span class="badge ok">built in</span></div>
+      <p>Converts English words to katakana for Irodori-TTS. A built-in dictionary fixes common words such as button (ボタン) and acronyms are spelled out (GUI becomes ジーユーアイ).</p>
+      <p><a href="https://github.com/VOICEVOX/kanalizer" target="_blank" rel="noreferrer">VOICEVOX/kanalizer</a> · MIT</p>
+    </div>
+    <div class="engine">
+      <div class="engine-head"><strong>${esc(r.label)}</strong>${badge}</div>
+      <p>Optional context model. Picks between readings that depend on the sentence, such as sake (サケ or セイク). Runs on the CPU, so the TTS model keeps all of the VRAM. Stops after 10 min idle.</p>
+      <p><a href="https://huggingface.co/${esc(r.repo_id)}" target="_blank" rel="noreferrer">${esc(r.repo_id)}</a> · LFM Open License v1.0${r.size ? ` · ${fmtBytes(r.size)}` : ""}</p>
+      <div class="card-actions reading-actions"></div>
+    </div>`;
+  const actions = root.querySelector(".reading-actions");
+  if (!r.ready && !job) {
+    const install = document.createElement("button");
+    install.className = "btn small";
+    install.textContent = r.model === "ready" ? "Install environment" : r.model === "incomplete" ? "Resume setup" : "Install · about 2.5 GB";
+    install.onclick = async () => {
+      try {
+        await api("/api/reading/install", { method: "POST" });
+        toast("Setting up the context model. Progress is shown in Activity.", "ok");
+        await refreshSystem();
+        refreshJobs();
+        renderReadingModel();
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    };
+    actions.appendChild(install);
+  }
+  if (r.model && !job) {
+    const del = document.createElement("button");
+    del.className = "icon-btn plain danger";
+    del.innerHTML = icon("trash");
+    del.title = "Delete the context model";
+    del.onclick = async () => {
+      if (!(await confirmBox("Delete model", `Delete ${r.label} (${fmtBytes(r.size)}) from disk? The environment stays installed.`))) return;
+      try {
+        await api("/api/reading/model", { method: "DELETE" });
+        S.readingStale = true;
+        refreshReadingStatus();
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    };
+    actions.appendChild(del);
+  }
+}
+
+async function refreshReadingDict() {
+  try {
+    S.readingDict = (await api("/api/reading/dictionary")).entries || [];
+  } catch (err) {
+    toast(err.message, "error");
+  }
+  renderReadingDict();
+}
+
+function renderReadingDict() {
+  const root = $("#reading-dict");
+  const entries = S.readingDict || [];
+  root.innerHTML = `
+    <div class="engine">
+      <div class="engine-head"><strong>Dictionary</strong><span class="badge">${entries.length} entr${entries.length === 1 ? "y" : "ies"}</span></div>
+      <p>Your readings take priority over everything else. Entries match whole words and ignore case, except entries written in all capitals, which only match all-capital text. Japanese words work too, for example 神戸 → こうべ.</p>
+      <form class="rd-add">
+        <input type="text" name="word" placeholder="Word, e.g. Spectra" maxlength="64" autocomplete="off">
+        <input type="text" name="reading" placeholder="Reading, e.g. スペクトラ" maxlength="128" autocomplete="off">
+        <button class="btn small" type="submit">Add</button>
+      </form>
+      <ul class="rd-list">${entries.map((e, i) => `<li><span class="rd-w">${esc(e.word)}</span><span class="rd-arrow">→</span><span class="rd-r">${esc(e.reading)}</span><button class="icon-btn plain danger" type="button" data-i="${i}" title="Remove ${esc(e.word)}">${icon("trash")}</button></li>`).join("")}</ul>
+    </div>`;
+  const changed = (list) => {
+    S.readingDict = list;
+    S.readingStale = true;
+    renderReadingDict();
+    scheduleReading(0);
+  };
+  root.querySelector(".rd-add").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    try {
+      const res = await api("/api/reading/dictionary", { method: "PUT", body: { word: form.word.value, reading: form.reading.value } });
+      toast(`Saved “${form.word.value.trim()}”`, "ok");
+      changed(res.entries);
+      root.querySelector('.rd-add input[name="word"]').focus();
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  });
+  root.querySelectorAll(".rd-list button").forEach((btn) => {
+    btn.onclick = async () => {
+      const entry = entries[Number(btn.dataset.i)];
+      try {
+        const res = await api("/api/reading/dictionary", { method: "DELETE", body: { word: entry.word } });
+        changed(res.entries);
+      } catch (err) {
+        toast(err.message, "error");
+      }
+    };
+  });
+}
+
 function voiceModified() {
   if (!S.voiceId) return false;
   const voice = S.voices.find((v) => v.id === S.voiceId);
@@ -808,7 +1148,7 @@ function updateGenerateState() {
   else if (!S.clips.length) why = "Add reference audio: this studio only clones voices.";
   else if (engine.reference.transcript === "required" && S.clips.some((c) => !(c.transcript || "").trim())) why = `${engine.name} needs a transcript for every reference clip.`;
   else if (!text) why = "Enter the text to speak.";
-  btn.disabled = !!why || !!S.job;
+  btn.disabled = !!why || !!S.job || S.preparing;
   reason.textContent = S.job ? "" : why;
   $("#text-counter").textContent = `${$("#text-input").value.length} chars`;
 }
@@ -976,10 +1316,12 @@ function entryCard(meta, { fresh = false, onRestore = null, onDelete = null } = 
       <div class="result-text"></div>
       <div class="card-actions"></div>
     </div>
+    ${meta.reading ? `<div class="result-reading" title="The text after reading conversion, as sent to the model"><span>Read as</span><span class="rr-text"></span></div>` : ""}
     <div class="result-meta">${chips.join("")}</div>
     <div class="takes"></div>
     ${(meta.messages || []).length ? `<ul class="messages">${meta.messages.map((m) => `<li class="${m.startsWith("warning") ? "warning" : m.startsWith("error") ? "error" : ""}">${esc(m.replace(/^(info|warning|error):\s*/, ""))}</li>`).join("")}</ul>` : ""}`;
   el.querySelector(".result-text").textContent = meta.text;
+  if (meta.reading) el.querySelector(".rr-text").textContent = meta.reading;
   const actions = el.querySelector(".card-actions");
   if (onRestore) {
     const b = document.createElement("button");
@@ -1046,6 +1388,10 @@ async function restoreEntry(meta) {
   }
   if (restored.length) S.clips = restored;
   S.voiceId = meta.voice?.id || "";
+  if (meta.reading_overrides) {
+    Object.assign(S.readingOverrides, meta.reading_overrides);
+    saveOverrides();
+  }
   $("#text-input").value = meta.text || "";
   store.set("text", meta.text || "");
   saveClips();
@@ -1102,11 +1448,20 @@ async function generate() {
     settings: engineSettings(engine.id),
   };
   let job;
+  S.preparing = true;
+  updateGenerateState();
   try {
+    if (readingEnabled()) {
+      const result = await refreshReading().catch(() => null);
+      if (result && result.source === payload.text) payload.reading = { source: result.source, text: readingText(result), overrides: usedOverrides(result) };
+    }
     job = await api("/api/generate", { method: "POST", body: payload });
   } catch (err) {
     toast(err.message, "error");
     return;
+  } finally {
+    S.preparing = false;
+    updateGenerateState();
   }
   S.job = job.id;
   setGenerating(true);
@@ -1543,6 +1898,7 @@ function refreshStudio() {
   $("#text-hint").textContent = engine ? TEXT_HINTS[engine.id] || "" : "";
   renderEmojiPalette();
   updateGenerateState();
+  scheduleReading(0);
 }
 
 async function refreshSystem() {
@@ -1556,6 +1912,8 @@ async function refreshSystem() {
       if (!S.activeJobs.has(id)) {
         refreshModels();
         refreshAsr();
+        refreshReadingStatus();
+        S.readingStale = true;
         refreshEngines().then(refreshStudio).catch(() => {});
         break;
       }
@@ -1625,7 +1983,7 @@ function showTab() {
   store.set("tab", tab);
   if (tab === "voices") renderVoices();
   if (tab === "history") loadHistory(true);
-  if (tab === "models") { renderModelTable(); renderEngines(); refreshJobs(); refreshAsr(); }
+  if (tab === "models") { renderModelTable(); renderEngines(); refreshJobs(); refreshAsr(); refreshReadingStatus(); refreshReadingDict(); }
 }
 
 function bindStatic() {
@@ -1659,7 +2017,7 @@ function bindStatic() {
   $("#record-btn").onclick = toggleRecording;
   const text = $("#text-input");
   text.value = store.get("text", "");
-  text.addEventListener("input", () => { store.set("text", text.value); updateGenerateState(); });
+  text.addEventListener("input", () => { store.set("text", text.value); updateGenerateState(); scheduleReading(); });
   bindEmojiPalette();
   $("#generate-btn").onclick = generate;
   $("#cancel-btn").onclick = cancelCurrent;

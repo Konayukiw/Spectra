@@ -15,6 +15,7 @@ Local TTS harness for voice cloning.
 - Voice Library: Save reference clips and their corresponding transcriptions with custom names.
 - Auto Transcript: Fill in reference transcripts with [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) (Apache-2.0, multilingual including Japanese, language is detected automatically).
 - Generation History: Stores takes, reference clips, and settings, allowing you to restore a previous session in the Studio with a single click.
+- Reading Conversion: For Irodori-TTS, English words and acronyms in Japanese text are converted to katakana with [kanalizer](https://github.com/VOICEVOX/kanalizer) (MIT) and a built-in dictionary. You can add your own readings, and an optional context model, [d1-omni-600M](https://huggingface.co/LiquidAI/d1-omni-600M), picks readings that depend on the sentence.
 
 ## Supported Engines
 
@@ -29,6 +30,16 @@ Japanese text should be generated with Irodori-TTS. Qwen3-TTS and VoxCPM are kep
 For Irodori-TTS, the text box has an emoji button that opens a palette of the emoji the model understands. Click an emoji to insert it at the cursor.
 
 Irodori-TTS was trained on utterances of up to 30 seconds and breaks down when it reads longer text in one pass. Spectra therefore splits text that is predicted to run longer than 20 seconds at sentence boundaries, generates each part with the same reference, and joins the parts with pauses that follow the punctuation.
+
+### Reading Conversion
+
+Irodori-TTS reads text through an LLM tokenizer without a pronunciation step, and it was trained on Japanese text, so English mixed into a sentence is often garbled. Spectra converts that English to katakana before generation, the way a Japanese speaker would say it.
+
+- `Graphical User Interface` becomes グラフィカルユーザーインターフェース, `GUI` becomes ジーユーアイ and `button` becomes ボタン.
+- Your dictionary comes first, then a built-in dictionary of common words, brands and acronyms, then kanalizer for every other word. Acronyms are spelled out letter by letter.
+- The Reading box under the text shows the result. Click any word to pick another reading, type your own, or save it to the dictionary. Manage the dictionary in **Models > Reading**. It also accepts Japanese words, for example 神戸 → こうべ.
+- Words whose reading depends on the sentence, such as `sake` (サケ or セイク), `live` (ライブ or リブ) and `No.` (ナンバー or ノー), are decided by the d1-omni-600M context model. It runs on the CPU, so the TTS model keeps all of the VRAM. Set it up once in **Models > Reading > Install** (about 2.5 GB). It was right in about 4 out of 5 cases in our tests, so check the words highlighted in yellow. Without it, the most common reading is used.
+- Turn the feature off with `Reading conversion` (Studio > Settings > Advanced). History keeps both the original text and the text that was read.
 
 ### Performance Reference (RTX 5070 12GB, short single sentence, model already loaded)
 
@@ -91,14 +102,19 @@ Spectra keeps datas in `.spectra`.
 | `data\history` | Generated takes and their settings |
 | `data\clips` | Reference clips converted to WAV |
 | `data\cache` | Hugging Face cache, codec weights and other caches |
+| `models\reading\LiquidAI--d1-omni-600M` | Reading context model |
+| `data\reading_dictionary.json` | Your reading dictionary |
 
 To download a model again, delete it in **Models > Installed models** first.
+
+Set the `SPECTRA_HOME` environment variable to keep everything in another folder instead of `%USERPROFILE%\.spectra`.
 
 ## Notes
 
 - Irodori-TTS embeds the SilentCipher digital watermark used by the upstream implementation. Turn on `Disable SilentCipher watermark` (Studio > Advanced) to save takes without it.
 - Please ensure you have a right from the individual before cloning their voice.
 - `Aratako/Irodori-TTS-v4-Large` is open weight and licensed under MIT, but [**Gemma Terms of Use**](https://ai.google.dev/gemma/terms) is applied for the part of the model. Read the docs before using the model.
+- `LiquidAI/d1-omni-600M` is licensed under the [**LFM Open License v1.0**](https://huggingface.co/LiquidAI/d1-omni-600M/blob/main/LICENSE). Commercial use is only allowed for organizations with less than 10 million USD in annual revenue. Read the license before using the model.
 
 ## License
 

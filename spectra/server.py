@@ -10,8 +10,8 @@ from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFi
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import asr, clips, engines, history, hub, models, voices
-from .generation import GenerationService
+from . import asr, clips, engines, history, hub, models, reading, voices
+from .generation import MAX_TEXT, GenerationService
 from .jobs import JobStore
 from .paths import STATIC_DIR, ensure_dirs
 from .workers import LogBuffer, WorkerError, WorkerManager
@@ -19,7 +19,8 @@ from .workers import LogBuffer, WorkerError, WorkerManager
 logs = LogBuffer()
 jobs = JobStore()
 workers = WorkerManager(logs)
-service = GenerationService(jobs, workers, logs)
+reader = reading.Reader(logs)
+service = GenerationService(jobs, workers, logs, reader)
 transcriber = asr.Transcriber(logs, workers, lambda: _gpu())
 workers.before_load = transcriber.release
 _gpu_cache: dict = {"t": 0.0, "data": None}
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     yield
     workers.unload()
     transcriber.release()
+    reader.release()
 
 
 app = FastAPI(title="Spectra", lifespan=lifespan)
@@ -235,6 +237,47 @@ def asr_delete_model():
         raise HTTPException(409, "Transcription is busy. Try again when it finishes.")
     transcriber.delete_model()
     return {"ok": True}
+
+
+@app.get("/api/reading")
+def reading_status():
+    return reader.status()
+
+
+@app.post("/api/reading/convert")
+def reading_convert(payload: dict = Body(...)):
+    text = str(payload.get("text") or "")
+    if len(text) > MAX_TEXT:
+        raise ValueError(f"Text is too long ({len(text)} characters). The limit is {MAX_TEXT}.")
+    return reader.convert(text, bool(payload.get("context", True)))
+
+
+@app.post("/api/reading/install")
+def reading_install():
+    return reading.start_setup(jobs).to_dict()
+
+
+@app.delete("/api/reading/model")
+def reading_delete_model():
+    if reader.busy or any(j.meta.get("engine") == reading.ENV_ID for j in jobs.list(kind="install", active_only=True)):
+        raise HTTPException(409, "The reading context model is busy. Try again when it finishes.")
+    reader.delete_model()
+    return {"ok": True}
+
+
+@app.get("/api/reading/dictionary")
+def reading_dictionary():
+    return {"entries": reading.user_entries()}
+
+
+@app.put("/api/reading/dictionary")
+def reading_dictionary_set(payload: dict = Body(...)):
+    return {"entries": reading.set_user_entry(payload.get("word"), payload.get("reading"))}
+
+
+@app.delete("/api/reading/dictionary")
+def reading_dictionary_delete(payload: dict = Body(...)):
+    return {"entries": reading.delete_user_entry(payload.get("word"))}
 
 
 @app.get("/api/clips/{clip_id}/audio")

@@ -3,16 +3,19 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import clips, engines, history, models, voices
 from .jobs import Job, JobStore
+from .reading import Reader
 from .workers import LogBuffer, WorkerError, WorkerExited, WorkerManager
 
 MAX_TEXT = 5000
+MAX_READING_TEXT = MAX_TEXT * 4
 
 
 class GenerationService:
-    def __init__(self, jobs: JobStore, workers: WorkerManager, logs: LogBuffer) -> None:
+    def __init__(self, jobs: JobStore, workers: WorkerManager, logs: LogBuffer, reader: Reader) -> None:
         self.jobs = jobs
         self.workers = workers
         self.logs = logs
+        self.reader = reader
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gpu")
 
     def _progress(self, job: Job):
@@ -115,6 +118,17 @@ class GenerationService:
                 voice = None
         settings = dict(payload.get("settings") or {})
         load_settings, gen_settings = engines.split_settings(model["engine"], settings)
+        spoken_request = None
+        if engine.get("reading") and gen_settings.get("reading_conversion", True):
+            provided = payload.get("reading") if isinstance(payload.get("reading"), dict) else {}
+            provided_text = str(provided.get("text") or "").strip()
+            overrides = provided.get("overrides") if isinstance(provided.get("overrides"), dict) else {}
+            if provided.get("source") == text and provided_text:
+                if len(provided_text) > MAX_READING_TEXT:
+                    raise ValueError(f"The reading is too long ({len(provided_text)} characters).")
+                spoken_request = {"text": provided_text, "overrides": {str(k): str(v) for k, v in overrides.items()}}
+            else:
+                spoken_request = {"text": None, "overrides": {}}
         preview = text if len(text) <= 40 else text[:40] + "…"
         job = self.jobs.create("generate", preview, model_id=model["id"])
         job.on_cancel = lambda: self._cancel_running(job)
@@ -143,13 +157,22 @@ class GenerationService:
                                 messages.append("info: some clips had no transcript, so the transcripts were not used.")
                         references = [{"path": str(joined), "transcript": transcript}]
                         messages.append(f"info: {engine['name']} takes one reference, so {len(refs)} clips were joined in order.")
+                    spoken = text
+                    if spoken_request is not None:
+                        spoken = spoken_request["text"]
+                        if spoken is None:
+                            progress("Converting English to kana")
+                            converted = self.reader.convert(text, bool(gen_settings.get("reading_context", True)))
+                            spoken = converted["text"]
+                            if converted["context"].get("error"):
+                                messages.append(f"warning: the reading context model failed, so default readings were used ({converted['context']['error']}).")
                     loaded = self.workers.ensure_model(model, load_settings, progress)
                     self._check_cancel(job)
                     entry_id, out_path = history.new_entry()
                     progress("Generating", 0.0)
                     result = self.workers.synthesize(
                         {
-                            "text": text,
+                            "text": spoken,
                             "references": references,
                             "settings": gen_settings,
                             "output_dir": str(out_path),
@@ -176,6 +199,10 @@ class GenerationService:
                         "runtime": {k: v for k, v in loaded.items() if k not in ("memory", "generate_defaults")},
                         "memory": result.get("memory", {}),
                     }
+                    if spoken != text:
+                        meta["reading"] = spoken
+                        if spoken_request and spoken_request["overrides"]:
+                            meta["reading_overrides"] = spoken_request["overrides"]
                     history.save(out_path, meta)
                     self.jobs.finish(job, meta)
                 except WorkerExited as exc:
