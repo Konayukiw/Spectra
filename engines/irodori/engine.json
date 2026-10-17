@@ -249,10 +249,10 @@
     {
       "key": "seconds", "label": "Fixed duration", "type": "float", "scope": "generate", "group": "Duration", "default": 0, "min": 0, "max": 60, "step": 0.5, "unit": "s", "zero_label": "Auto",
       "help": {
-        "summary": "Exact output length in seconds. 0 lets the built-in duration predictor choose the length.",
+        "summary": "Exact output length in seconds. 0 lets the built-in duration predictor choose the length. When the length is above 20 s, the text is split into parts and the length is spread over them in proportion to their predicted durations.",
         "increase": "Longer than natural makes speech slow with long pauses or trailing noise.",
         "decrease": "Shorter than natural makes speech rushed or cut off.",
-        "tip": "Prefer Auto plus Duration scale. Use a fixed length only for timing to video."
+        "tip": "Prefer Auto plus Duration scale. Use a fixed length only for timing to video. Silence trimming and the pauses between parts can make split output slightly shorter or longer than the value."
       }
     },
     {
@@ -267,10 +267,10 @@
     {
       "key": "max_seconds", "label": "Max duration", "type": "float", "scope": "generate", "group": "Duration", "default": 30, "min": 5, "max": 60, "step": 1, "unit": "s",
       "help": {
-        "summary": "Upper limit on the predicted duration of one generation.",
-        "increase": "Allows longer passages in a single take. Models were trained on short utterances, so very long outputs get less stable.",
-        "decrease": "Keeps outputs short and stable.",
-        "tip": "For long text, generate sentence by sentence instead of raising this."
+        "summary": "Upper limit on the length of one generated part. Text predicted to be longer than 20 s, or longer than this value if it is lower, is split at sentence boundaries, generated part by part and joined automatically.",
+        "increase": "Values of 20 s and above all behave the same, because parts never exceed 20 s. Irodori-TTS was trained on utterances of up to 30 s and breaks down beyond that.",
+        "decrease": "Below 20 s the text is split into shorter parts. Each part is more stable, but intonation is carried across fewer sentences.",
+        "tip": "Leave it at 20 s or more. Long text is handled by splitting, so there is no need to raise this."
       }
     },
     {

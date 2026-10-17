@@ -1,5 +1,8 @@
+import math
 import os
 import sys
+import time
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
@@ -14,6 +17,8 @@ from safetensors import safe_open
 from irodori_tts import inference_runtime as rt
 from irodori_tts import meanflow as rt_meanflow
 from irodori_tts import rf as rt_rf
+from irodori_tts.duration import build_duration_features
+from irodori_tts.text_normalization import normalize_text
 
 try:
     from transformers.initialization import no_init_weights
@@ -24,6 +29,34 @@ CACHE_DIR = Path(os.environ.get("SPECTRA_CACHE_DIR", Path(__file__).resolve().pa
 _CAST_DTYPE: torch.dtype | None = None
 _ORIGINAL_LOADER = rt._load_checkpoint_from_safetensors
 _MODEL_CLS = rt.TextToLatentRFDiT
+
+PART_SECONDS = 20.0
+PAUSE_SCALES = (("…‥", 1.4), ("。．！!？?", 1.0), ("、，,", 0.5))
+DEFAULT_PAUSE = 0.30
+PAUSE_RANGE = (0.25, 1.2)
+MIN_INNER_PAUSE = 0.2
+SPLIT_PAUSE = 0.05
+HEAD_MARGIN = 0.04
+TAIL_MARGIN = 0.08
+FADE_SECONDS = 0.008
+SILENCE_RANGE_DB = 40.0
+SILENCE_FLOOR_DB = -70.0
+SEED_STRIDE = 1000
+_OPENERS = "「『（(【［[〈《“‘"
+_CLOSERS = "」』）)】］]〉》”’"
+_SENTENCE_ENDS = "。．！!？?…‥"
+_CLAUSE_ENDS = "、，,"
+_JOINERS = "\u200d\ufe0f"
+_SKIPPED_CATEGORIES = {"So", "Sk", "Mn", "Me", "Cf"}
+_KEPT_MESSAGES = ("warning", "info: predicted", "info: using manual", "info: MeanFlow")
+_WATERMARK_WARNING = "warning: SilentCipher watermark is unavailable"
+_STAGE_AFTER = {
+    "prepare_reference": "Predicting duration",
+    "predict_duration": "Sampling",
+    "sample_rf": "Decoding audio",
+    "sample_meanflow": "Decoding audio",
+    "decode_latent": "Finishing",
+}
 
 
 def _build_model_without_random_init(*args, **kwargs):
@@ -99,6 +132,161 @@ def _find_checkpoint(model_dir: Path) -> Path:
     if not found:
         raise FileNotFoundError(f"No model.safetensors found in {model_dir}")
     return found[0]
+
+
+def _ends_here(text: str, index: int, enders: str) -> bool:
+    char = text[index]
+    if char == "\n":
+        return True
+    if char not in enders:
+        return False
+    if char != ".":
+        return True
+    following = text[index + 1] if index + 1 < len(text) else " "
+    return following.isspace() or following in enders or following in _CLOSERS
+
+
+def _split_text(text: str, enders: str, nested: bool) -> list[str]:
+    pieces = []
+    start = depth = index = 0
+    while index < len(text):
+        char = text[index]
+        if char in _OPENERS:
+            depth += 1
+        elif char in _CLOSERS:
+            depth = max(0, depth - 1)
+        if (depth == 0 or not nested or char == "\n") and _ends_here(text, index, enders):
+            end = index + 1
+            while end < len(text) and (text[end] in enders or text[end] in _CLOSERS or text[end].isspace()):
+                if text[end] in _CLOSERS:
+                    depth = max(0, depth - 1)
+                end += 1
+            if "\n" in text[index:end]:
+                depth = 0
+            pieces.append(text[start:end])
+            start = index = end
+            continue
+        index += 1
+    if start < len(text):
+        pieces.append(text[start:])
+    return pieces
+
+
+def _split_evenly(text: str, count: int) -> list[str]:
+    pieces = []
+    start = 0
+    for part in range(1, count):
+        cut = round(len(text) * part / count)
+        while 0 < cut < len(text) and (text[cut] in _JOINERS or text[cut - 1] == "\u200d"):
+            cut += 1
+        if start < cut < len(text):
+            pieces.append(text[start:cut])
+            start = cut
+    pieces.append(text[start:])
+    return pieces
+
+
+def _fit_piece(piece: str, estimate, budget: float) -> list[str]:
+    seconds = estimate(piece)
+    if seconds <= budget:
+        return [piece]
+    for enders in (_SENTENCE_ENDS, _CLAUSE_ENDS):
+        pieces = _split_text(piece, enders, nested=False)
+        if len(pieces) > 1:
+            return [fitted for part in pieces for fitted in _fit_piece(part, estimate, budget)]
+    count = math.ceil(seconds / budget) + 1 if math.isfinite(seconds) else math.ceil(len(piece) / 80) + 1
+    pieces = _split_evenly(piece, max(2, count))
+    if len(pieces) < 2:
+        return [piece]
+    return [fitted for part in pieces for fitted in _fit_piece(part, estimate, budget)]
+
+
+def _plan_parts(text: str, estimate, budget: float) -> list[str]:
+    units = [fitted for piece in _split_text(text, _SENTENCE_ENDS, nested=True) for fitted in _fit_piece(piece, estimate, budget)]
+    parts = []
+    current = ""
+    for unit in units:
+        if normalize_text(current).strip() and estimate(current + unit) > budget:
+            parts.append(current)
+            current = unit
+        else:
+            current += unit
+    parts.append(current)
+    return [part for part in parts if normalize_text(part).strip()]
+
+
+def _pause_scale(text: str) -> float | None:
+    scale = None
+    line_break = False
+    for char in reversed(text):
+        if char == "\n":
+            line_break = True
+        if char.isspace() or char in _CLOSERS or unicodedata.category(char) in _SKIPPED_CATEGORIES:
+            continue
+        scale = next((value for chars, value in PAUSE_SCALES if char in chars), None)
+        break
+    return max(scale or 0.0, 1.0) if line_break else scale
+
+
+def _pause_seconds(scale: float | None, base: float) -> float:
+    return SPLIT_PAUSE if scale is None else base * scale
+
+
+def _voiced_frames(audio: np.ndarray, sample_rate: int) -> tuple[np.ndarray, int]:
+    frame = max(1, sample_rate // 100)
+    count = len(audio) // frame
+    if count == 0:
+        return np.zeros(0, dtype=bool), frame
+    rms = np.sqrt(np.mean(np.square(audio[: count * frame].reshape(count, frame)), axis=1) + 1e-12)
+    level = 20.0 * np.log10(rms)
+    return level > max(float(level.max()) - SILENCE_RANGE_DB, SILENCE_FLOOR_DB), frame
+
+
+def _typical_pause(parts: list[np.ndarray], sample_rate: int) -> float:
+    pauses = []
+    for audio in parts:
+        voiced, frame = _voiced_frames(audio, sample_rate)
+        indices = np.flatnonzero(voiced)
+        if indices.size < 2:
+            continue
+        gaps = np.diff(indices) - 1
+        pauses.extend(float(gap) * frame / sample_rate for gap in gaps if gap * frame >= MIN_INNER_PAUSE * sample_rate)
+    if not pauses:
+        return DEFAULT_PAUSE
+    return float(min(max(np.median(pauses), PAUSE_RANGE[0]), PAUSE_RANGE[1]))
+
+
+def _trim_silence(audio: np.ndarray, sample_rate: int) -> np.ndarray:
+    voiced, frame = _voiced_frames(audio, sample_rate)
+    voiced = np.flatnonzero(voiced)
+    if voiced.size == 0:
+        return audio
+    start = max(0, int(voiced[0]) * frame - int(HEAD_MARGIN * sample_rate))
+    end = min(len(audio), (int(voiced[-1]) + 1) * frame + int(TAIL_MARGIN * sample_rate))
+    trimmed = audio[start:end].copy()
+    fade = min(int(FADE_SECONDS * sample_rate), len(trimmed) // 2)
+    if fade > 0:
+        ramp = np.linspace(0.0, 1.0, fade, dtype=np.float32)
+        trimmed[:fade] *= ramp
+        trimmed[-fade:] *= ramp[::-1]
+    return trimmed
+
+
+def _join_parts(parts: list[np.ndarray], scales: list[float | None], sample_rate: int) -> tuple[np.ndarray, list[int]]:
+    base = _typical_pause(parts, sample_rate)
+    pieces = []
+    cuts = []
+    length = 0
+    for index, audio in enumerate(parts):
+        trimmed = _trim_silence(audio, sample_rate)
+        pieces.append(trimmed)
+        length += len(trimmed)
+        if index < len(scales):
+            gap = int(round(max(0.0, _pause_seconds(scales[index], base) - HEAD_MARGIN - TAIL_MARGIN) * sample_rate))
+            pieces.append(np.zeros(gap, dtype=np.float32))
+            cuts.append(length + gap // 2)
+            length += gap
+    return np.concatenate(pieces), cuts
 
 
 class IrodoriEngine(mw.Engine):
@@ -219,13 +407,11 @@ class IrodoriEngine(mw.Engine):
         kv_layers = int(s.get("speaker_kv_max_layers") or 0)
         max_ref = float(s.get("max_ref_seconds") or 0)
         seeds = mw.resolve_seeds(s.get("seed", -1), max(1, min(8, int(s.get("takes") or 1))))
-        req = rt.SamplingRequest(
-            text=str(request["text"]),
+        base = dict(
             caption=(str(s.get("caption") or "").strip() or None),
             ref_latents=latents,
             num_candidates=len(seeds),
             decode_mode=str(s.get("decode_mode") or "sequential"),
-            seconds=seconds,
             duration_scale=float(s.get("duration_scale") or 1.0),
             max_seconds=float(s.get("max_seconds") or 30.0),
             max_ref_seconds=None if max_ref <= 0 else max_ref,
@@ -243,13 +429,141 @@ class IrodoriEngine(mw.Engine):
             speaker_kv_scale=kv_scale,
             speaker_kv_min_t=float(s.get("speaker_kv_min_t", 0.9)) if kv_scale is not None else None,
             speaker_kv_max_layers=kv_layers if kv_layers > 0 else None,
-            seed=seeds[0],
             t_schedule_mode=str(s.get("t_schedule_mode") or "linear"),
             sway_coeff=float(s.get("sway_coeff", -1.0)),
             trim_tail=bool(s.get("trim_tail", True)),
         )
+        text = str(request["text"])
+        progress("Planning parts")
+        started = time.perf_counter()
+        parts, part_seconds, plan_messages = self._plan(text, seconds, base)
+        plan_seconds = time.perf_counter() - started
+        if len(parts) < 2:
+            result = self._sample(rt.SamplingRequest(text=text, seconds=seconds, seed=seeds[0], **base), seeds, progress, "", 0.05, 0.95)
+            sample_rate = result.sample_rate
+            audios = [audio.detach().float().cpu().numpy().reshape(-1) for audio in result.audios]
+            messages = [m for m in result.messages if m.startswith(_KEPT_MESSAGES)]
+            timings = {name: round(sec, 3) for name, sec in result.stage_timings}
+            used_seed = result.used_seed
+        else:
+            audios, sample_rate, messages, timings = self._synthesize_parts(parts, part_seconds, base, seeds, progress)
+            messages = plan_messages + messages
+            timings["plan_parts"] = round(plan_seconds, 3)
+            used_seed = seeds[0]
+        out_dir = Path(request["output_dir"])
+        prefix = str(request.get("prefix") or "take")
+        takes = []
+        for index, audio in enumerate(audios, start=1):
+            name = f"{prefix}_{index}.wav"
+            duration = mw.write_wav(out_dir / name, audio, sample_rate)
+            takes.append({"file": name, "duration": round(duration, 3), "seed": seeds[index - 1]})
+        return {
+            "takes": takes,
+            "sample_rate": sample_rate,
+            "seed": used_seed,
+            "timings": timings,
+            "messages": messages,
+        }
+
+    def _duration_estimator(self, base: dict):
+        runtime = self.runtime
+        cfg = runtime.model_cfg
+        if not cfg.use_duration_predictor:
+            return None
+        model = runtime.model
+        device = runtime.model_device
+        max_len = runtime.default_text_max_len
+        caption_text = base.get("caption") or ""
+        probe = rt.SamplingRequest(text="", ref_latents=base["ref_latents"], max_ref_seconds=base["max_ref_seconds"])
+        with torch.inference_mode():
+            ref_latent, ref_mask = runtime._load_reference_latent(req=probe, batch_size=1, messages=[])
+            has_speaker = torch.zeros((1,), dtype=torch.bool, device=device)
+            if cfg.use_speaker_condition_resolved and ref_mask is not None:
+                has_speaker = ref_mask.any(dim=1)
+            caption_ids = caption_mask = has_caption = None
+            if cfg.use_caption_condition:
+                caption_ids, caption_mask = runtime.caption_tokenizer.batch_encode([caption_text], max_length=runtime.default_caption_max_len)
+                if not caption_text:
+                    caption_mask.zero_()
+                caption_ids, caption_mask = caption_ids.to(device), caption_mask.to(device)
+                has_caption = torch.full((1,), bool(caption_text), dtype=torch.bool, device=device)
+        frame_seconds = int(runtime.codec.model.hop_length) / float(runtime.codec.sample_rate)
+        cache: dict[str, float] = {}
+
+        def estimate(text: str) -> float:
+            normalized = normalize_text(text).strip()
+            if not normalized:
+                return 0.0
+            if normalized in cache:
+                return cache[normalized]
+            if len(runtime.tokenizer.tokenizer.encode(normalized, add_special_tokens=False)) >= max_len:
+                cache[normalized] = math.inf
+                return math.inf
+            with torch.inference_mode():
+                ids, mask = runtime.tokenizer.batch_encode([normalized], max_length=max_len)
+                ids, mask = ids.to(device), mask.to(device)
+                features = build_duration_features([normalized], token_counts=mask.sum(dim=1), max_text_len=max_len, has_speaker=has_speaker).to(device)
+                text_state, text_mask, speaker_state, speaker_mask, caption_state, caption_state_mask = model.encode_conditions(
+                    text_input_ids=ids,
+                    text_mask=mask,
+                    ref_latent=ref_latent,
+                    ref_mask=ref_mask,
+                    caption_input_ids=caption_ids,
+                    caption_mask=caption_mask,
+                )
+                log_frames = model.predict_duration_log_frames(
+                    text_state=text_state,
+                    text_mask=text_mask,
+                    speaker_state=speaker_state,
+                    speaker_mask=speaker_mask,
+                    caption_state=caption_state,
+                    caption_mask=caption_state_mask,
+                    duration_features=features,
+                    has_speaker=has_speaker,
+                    has_caption=has_caption,
+                )
+            cache[normalized] = float(torch.expm1(log_frames).float().mean().item()) * frame_seconds
+            return cache[normalized]
+
+        return estimate
+
+    def _plan(self, text: str, seconds: float | None, base: dict) -> tuple[list[str], list[float | None], list[str]]:
+        limit = min(PART_SECONDS, float(base["max_seconds"]))
+        if seconds is not None and seconds <= limit:
+            return [text], [seconds], []
+        estimate = self._duration_estimator(base)
+        if estimate is None:
+            return [text], [seconds], []
+        if seconds is None:
+            scale = float(base["duration_scale"])
+            if estimate(text) * scale <= limit:
+                return [text], [None], []
+            parts = _plan_parts(text, estimate, limit / scale)
+            if len(parts) < 2:
+                return [text], [None], []
+            summary = ", ".join(f"{estimate(part) * scale:.0f}" for part in parts)
+            return parts, [None] * len(parts), [f"info: long text was split into {len(parts)} parts ({summary} s)."]
+
+        def spread(parts: list[str]) -> float:
+            pauses = sum(_pause_seconds(_pause_scale(part), DEFAULT_PAUSE) for part in parts[:-1])
+            speech = max(seconds - pauses, 0.5 * len(parts))
+            return speech / max(sum(estimate(part) for part in parts), 1e-6)
+
+        parts = _plan_parts(text, estimate, limit)
+        ratio = spread(parts)
+        if ratio * max(estimate(part) for part in parts) > limit:
+            parts = _plan_parts(text, estimate, max(limit / ratio, 2.0))
+            ratio = spread(parts)
+        if len(parts) < 2:
+            return [text], [seconds], []
+        lengths = [estimate(part) * ratio for part in parts]
+        summary = ", ".join(f"{value:.0f}" for value in lengths)
+        return parts, lengths, [f"info: fixed duration {seconds:.1f} s was spread over {len(parts)} parts ({summary} s)."]
+
+    def _sample(self, req, seeds: list[int], progress: mw.Progress, label: str, low: float, high: float):
         is_meanflow = self.runtime.model_cfg.flow_parameterization == "meanflow"
         total_steps = req.num_steps or (4 if is_meanflow else 40)
+        prefix = f"{label}: " if label else ""
         seen_t: set[float] = set()
         model = self.runtime.model
         original_forward = model.forward_with_encoded_conditions
@@ -258,25 +572,18 @@ class IrodoriEngine(mw.Engine):
             t = kwargs.get("t")
             if t is not None:
                 seen_t.add(round(float(t.reshape(-1)[0].item()), 6))
-                progress(f"Sampling step {min(len(seen_t), total_steps)}/{total_steps}", min(len(seen_t) / total_steps, 1.0) * 0.9 + 0.05)
+                done = min(len(seen_t) / total_steps, 1.0)
+                progress(f"{prefix}Sampling step {min(len(seen_t), total_steps)}/{total_steps}", low + (high - low) * done)
             return original_forward(*args, **kwargs)
-
-        stage_after = {
-            "prepare_reference": "Predicting duration",
-            "predict_duration": "Sampling",
-            "sample_rf": "Decoding audio",
-            "sample_meanflow": "Decoding audio",
-            "decode_latent": "Finishing",
-        }
 
         def on_log(message: str) -> None:
             mw.log(message)
             if message.startswith("[runtime] "):
                 stage = message[len("[runtime] "):].split(":")[0].split(" (")[0]
-                if stage in stage_after:
-                    progress(stage_after[stage])
+                if stage in _STAGE_AFTER:
+                    progress(prefix + _STAGE_AFTER[stage])
 
-        mw.log(f"[spectra] take seeds: {', '.join(map(str, seeds))}")
+        mw.log(f"[spectra] {prefix}take seeds: {', '.join(map(str, seeds))}")
         noise = _PerTakeNoise(seeds)
         model.forward_with_encoded_conditions = tracked_forward
         rt_rf.torch = rt_meanflow.torch = noise
@@ -287,21 +594,67 @@ class IrodoriEngine(mw.Engine):
             rt_rf.torch = rt_meanflow.torch = torch
         if not noise.used:
             raise RuntimeError("Per-take seeding did not reach the Irodori sampler. The irodori-tts package may have changed.")
-        out_dir = Path(request["output_dir"])
-        prefix = str(request.get("prefix") or "take")
-        takes = []
-        for index, audio in enumerate(result.audios, start=1):
-            name = f"{prefix}_{index}.wav"
-            duration = mw.write_wav(out_dir / name, audio.detach().float().cpu().numpy(), result.sample_rate)
-            takes.append({"file": name, "duration": round(duration, 3), "seed": seeds[index - 1]})
-        messages = [m for m in result.messages if m.startswith(("warning", "info: predicted", "info: using manual", "info: MeanFlow"))]
-        return {
-            "takes": takes,
-            "sample_rate": result.sample_rate,
-            "seed": result.used_seed,
-            "timings": {name: round(sec, 3) for name, sec in result.stage_timings},
-            "messages": messages,
-        }
+        return result
+
+    def _synthesize_parts(self, parts: list[str], part_seconds: list[float | None], base: dict, seeds: list[int], progress: mw.Progress):
+        watermarker = self.runtime.watermarker
+        backend = watermarker.model
+        weights = np.cumsum([0] + [max(len(part), 1) for part in parts]) / max(sum(len(part) for part in parts), 1)
+        collected: list[list[np.ndarray]] = [[] for _ in seeds]
+        messages: list[str] = []
+        timings: dict[str, float] = {}
+        sample_rate = int(self.runtime.codec.sample_rate)
+        watermarker.model = None
+        try:
+            for index, (part, seconds) in enumerate(zip(parts, part_seconds)):
+                part_seeds = [seed + index * SEED_STRIDE for seed in seeds]
+                label = f"Part {index + 1}/{len(parts)}"
+                low = 0.05 + 0.9 * float(weights[index])
+                high = 0.05 + 0.9 * float(weights[index + 1])
+                mw.log(f"[spectra] {label}: {part}")
+                result = self._sample(rt.SamplingRequest(text=part, seconds=seconds, seed=part_seeds[0], **base), part_seeds, progress, label, low, high)
+                sample_rate = result.sample_rate
+                for take, audio in enumerate(result.audios):
+                    collected[take].append(audio.detach().float().cpu().numpy().reshape(-1))
+                for name, sec in result.stage_timings:
+                    timings[name] = timings.get(name, 0.0) + sec
+                for message in result.messages:
+                    if message.startswith("warning") and not message.startswith(_WATERMARK_WARNING) and message not in messages:
+                        messages.append(message)
+        finally:
+            watermarker.model = backend
+        progress("Joining parts", 0.96)
+        started = time.perf_counter()
+        scales = [_pause_scale(part) for part in parts[:-1]]
+        joined = [_join_parts(pieces, scales, sample_rate) for pieces in collected]
+        timings["join_parts"] = time.perf_counter() - started
+        if watermarker.ready:
+            progress("Watermarking", 0.97)
+            started = time.perf_counter()
+            audios = [self._watermark_joined(audio, sample_rate, cuts) for audio, cuts in joined]
+            timings["silentcipher_watermark"] = time.perf_counter() - started
+        else:
+            audios = [audio for audio, _ in joined]
+            messages.append(f"{_WATERMARK_WARNING}, so the audio was not watermarked.")
+        return audios, sample_rate, messages, {name: round(sec, 3) for name, sec in timings.items()}
+
+    def _watermark_joined(self, audio: np.ndarray, sample_rate: int, cuts: list[int]) -> np.ndarray:
+        watermarker = self.runtime.watermarker
+        config = watermarker.model.config
+        period = int(config.HOP_LENGTH) * int(config.message_len)
+        ratio = float(watermarker.model.sr) / float(sample_rate)
+        bounds = [0] + cuts + [len(audio)]
+        pieces = []
+        for start, end in zip(bounds[:-1], bounds[1:]):
+            if end <= start:
+                continue
+            origin = min(start, int(round(math.floor(start * ratio / period) * period / ratio)))
+            marked = watermarker.encode_one(torch.from_numpy(np.ascontiguousarray(audio[origin:end])), sample_rate=sample_rate)
+            marked = marked.numpy().reshape(-1)[: end - origin]
+            if len(marked) < end - origin:
+                marked = np.concatenate([marked, audio[origin + len(marked):end]])
+            pieces.append(marked[start - origin:].astype(np.float32))
+        return np.concatenate(pieces)
 
 
 if __name__ == "__main__":

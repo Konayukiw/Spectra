@@ -26,6 +26,8 @@ Japanese text should be generated with Irodori-TTS. Qwen3-TTS and VoxCPM are kep
 
 For Irodori-TTS, the text box has an emoji button that opens a palette of the emoji the model understands. Click an emoji to insert it at the cursor.
 
+Irodori-TTS was trained on utterances of up to 30 seconds and breaks down when it reads longer text in one pass. Spectra therefore splits text that is predicted to run longer than 20 seconds at sentence boundaries, generates each part with the same reference, and joins the parts with pauses that follow the punctuation.
+
 ### Performance Reference (RTX 5070 12GB, short single sentence, model already loaded)
 
 | Model | Precision | Peak VRAM | Audio Duration / Generation Time |
