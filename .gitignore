@@ -1,0 +1,10 @@
+tests/
+misc/
+models/
+.claude/
+data/
+.venv/
+engines/*/.venv/
+__pycache__/
+*.pyc
+

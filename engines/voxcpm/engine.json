@@ -1,0 +1,162 @@
+{
+  "id": "voxcpm",
+  "order": 3,
+  "name": "VoxCPM",
+  "tagline": "OpenBMB tokenizer-free TTS (MiniCPM backbone + diffusion head). VoxCPM2 clones from reference audio alone or continues from a transcribed prompt.",
+  "homepage": "https://github.com/OpenBMB/VoxCPM",
+  "license": "Apache-2.0",
+  "languages": ["English", "Chinese", "and 27 more"],
+  "reference": {
+    "transcript": "optional",
+    "multi_clip": false,
+    "recommended": "One clean clip of 5 to 20 s. Add the exact transcript for the closest clone",
+    "min_seconds": 3,
+    "max_seconds": 40
+  },
+  "detect": {
+    "name": ["voxcpm"],
+    "config": {"file": "config.json", "match": {"architecture": ["voxcpm2", "voxcpm"]}}
+  },
+  "download": {
+    "allow": ["*"],
+    "subfolder_allow": ["{sub}/*"]
+  },
+  "suggested": [
+    {"repo": "openbmb/VoxCPM2", "label": "VoxCPM2 (2B)", "note": "Reference-only and continuation cloning. About 5 GB, about 8 GB VRAM."},
+    {"repo": "openbmb/VoxCPM1.5", "label": "VoxCPM 1.5", "note": "Older. Continuation cloning only (transcript required)."}
+  ],
+  "settings": [
+    {
+      "key": "clone_mode", "label": "Clone mode", "type": "select", "scope": "generate", "group": "Basic", "default": "auto",
+      "options": [
+        {"value": "auto", "label": "Auto", "help": "Reference + continuation when a transcript is given, otherwise reference only."},
+        {"value": "reference", "label": "Reference only", "help": "Copies the timbre from the clip without needing a transcript. Delivery follows the text and the style instruction, not the reference."},
+        {"value": "continuation", "label": "Continuation", "help": "The model treats the reference as the beginning of the same recording and continues it. Copies rhythm and emotion too. Needs an exact transcript."},
+        {"value": "combined", "label": "Reference + continuation", "help": "Uses both paths. Closest overall similarity (the 'ultimate cloning' setup). Needs an exact transcript."}
+      ],
+      "help": {
+        "summary": "How the reference is used. VoxCPM2 has an isolated reference path and a continuation path.",
+        "increase": "Continuation and combined copy prosody, emotion and room sound in addition to timbre.",
+        "decrease": "Reference only copies the timbre and lets you control the delivery with a style instruction.",
+        "tip": "Use combined for a faithful clone and reference only when you want to change the emotion."
+      }
+    },
+    {
+      "key": "style", "label": "Style instruction", "type": "text", "scope": "generate", "group": "Basic", "default": "", "placeholder": "e.g. slightly faster, cheerful tone",
+      "help": {
+        "summary": "Free-form instruction for speed, emotion or style, added in parentheses in front of the text. Only applied in 'Reference only' mode.",
+        "increase": "A concrete instruction such as 'whispering, slow' changes the delivery while keeping the cloned timbre.",
+        "decrease": "Leave empty for a neutral reading.",
+        "tip": "English or Chinese instructions are the most reliable."
+      }
+    },
+    {
+      "key": "takes", "label": "Takes", "type": "int", "scope": "generate", "group": "Basic", "default": 1, "min": 1, "max": 8, "step": 1,
+      "help": {
+        "summary": "How many takes to generate one after another. With Seed -1 every take gets its own random seed. With a fixed seed, take n uses seed + n - 1.",
+        "increase": "More variations. Time grows linearly.",
+        "decrease": "Faster.",
+        "tip": "2 or 3 takes make it easy to pick the best reading."
+      }
+    },
+    {
+      "key": "seed", "label": "Seed", "type": "seed", "scope": "generate", "group": "Basic", "default": -1,
+      "help": {
+        "summary": "Random seed for the language model and the diffusion noise. -1 picks a new random seed for every take.",
+        "increase": "A fixed value reproduces the same take with the same inputs and settings.",
+        "decrease": "-1 gives a fresh variation every run.",
+        "tip": "Copy the seed of a good take from the result card."
+      }
+    },
+    {
+      "key": "cfg_value", "label": "Guidance (CFG)", "type": "float", "scope": "generate", "group": "Sampling", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.1,
+      "help": {
+        "summary": "Classifier-free guidance of the diffusion head. Controls how strictly the audio follows the text and the voice prompt.",
+        "increase": "Clearer articulation and closer adherence. Too high sounds harsh, over-pronounced or metallic.",
+        "decrease": "Softer and more relaxed, but less precise and occasionally mumbled.",
+        "tip": "1.6 to 2.5 is the useful range."
+      }
+    },
+    {
+      "key": "inference_timesteps", "label": "Diffusion steps", "type": "int", "scope": "generate", "group": "Sampling", "default": 10, "min": 2, "max": 50, "step": 1,
+      "help": {
+        "summary": "Number of diffusion steps used to generate each audio patch.",
+        "increase": "More detailed, cleaner audio. Time grows roughly linearly.",
+        "decrease": "Faster but grainier.",
+        "tip": "10 is the default. 15 to 25 for final renders, 6 for drafts."
+      }
+    },
+    {
+      "key": "trim_silence", "label": "Trim reference silences", "type": "bool", "scope": "generate", "group": "Reference", "default": false,
+      "help": {
+        "summary": "Removes long silences from the reference with voice activity detection before encoding.",
+        "increase": "On helps when the reference has long gaps, which otherwise turn into long pauses in the output.",
+        "decrease": "Off keeps the reference exactly as recorded.",
+        "tip": "Turn on if outputs start with or contain unnatural pauses."
+      }
+    },
+    {
+      "key": "denoise", "label": "Denoise reference", "type": "bool", "scope": "generate", "group": "Reference", "default": false,
+      "help": {
+        "summary": "Runs the ZipEnhancer noise suppressor on the reference before cloning. The first use downloads the model from ModelScope.",
+        "increase": "On removes background noise and hum that would otherwise be cloned too.",
+        "decrease": "Off keeps the original character of the recording, which matters for continuation mode.",
+        "tip": "Use only for noisy references. Denoised clips are cached."
+      }
+    },
+    {
+      "key": "normalize", "label": "Text normalization", "type": "bool", "scope": "generate", "group": "Advanced", "default": false,
+      "help": {
+        "summary": "Expands numbers, dates and symbols into words before synthesis using VoxCPM's normalizer.",
+        "increase": "On helps Chinese and English text with numbers.",
+        "decrease": "Off passes the text unchanged.",
+        "tip": "Turn on when English text contains numbers, dates or units. The normalizer targets Chinese and English."
+      }
+    },
+    {
+      "key": "retry_badcase", "label": "Retry bad takes", "type": "bool", "scope": "generate", "group": "Advanced", "default": true,
+      "help": {
+        "summary": "Automatically regenerates when the audio is abnormally long for the text, which usually means looping or babbling.",
+        "increase": "On makes failures much rarer at the cost of occasional extra time.",
+        "decrease": "Off returns the first result even if it is broken.",
+        "tip": "Keep on."
+      }
+    },
+    {
+      "key": "retry_badcase_max_times", "label": "Max retries", "type": "int", "scope": "generate", "group": "Advanced", "default": 3, "min": 1, "max": 10, "step": 1, "advanced": true,
+      "help": {
+        "summary": "How many attempts are made when a bad take is detected.",
+        "increase": "Higher success rate, longer worst-case time.",
+        "decrease": "Faster failures.",
+        "tip": "3 is enough."
+      }
+    },
+    {
+      "key": "retry_badcase_ratio_threshold", "label": "Bad take length ratio", "type": "float", "scope": "generate", "group": "Advanced", "default": 6.0, "min": 2.0, "max": 20.0, "step": 0.5, "advanced": true,
+      "help": {
+        "summary": "Maximum audio length per text token before a take counts as bad. It also caps the generation length.",
+        "increase": "Allows slower speech and long pauses before retrying.",
+        "decrease": "Retries sooner. Too low cuts off slow, legitimate speech.",
+        "tip": "Raise to 8 if slow readings get cut."
+      }
+    },
+    {
+      "key": "max_len", "label": "Max length", "type": "int", "scope": "generate", "group": "Advanced", "default": 4096, "min": 64, "max": 8192, "step": 64, "advanced": true,
+      "help": {
+        "summary": "Hard limit of generated audio patches.",
+        "increase": "Allows longer outputs.",
+        "decrease": "Caps runaway generations.",
+        "tip": "The bad take length ratio usually limits length first."
+      }
+    },
+    {
+      "key": "min_len", "label": "Min length", "type": "int", "scope": "generate", "group": "Advanced", "default": 2, "min": 1, "max": 200, "step": 1, "advanced": true,
+      "help": {
+        "summary": "Minimum number of audio patches before the model may stop.",
+        "increase": "Prevents empty or truncated output for very short text.",
+        "decrease": "Lets short words end naturally.",
+        "tip": "Leave at 2."
+      }
+    }
+  ]
+}

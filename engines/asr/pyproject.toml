@@ -1,0 +1,19 @@
+[project]
+name = "spectra-engine-asr"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "qwen-asr==0.0.6",
+    "torch==2.10.*",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

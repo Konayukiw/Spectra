@@ -1,0 +1,362 @@
+{
+  "id": "irodori",
+  "order": 1,
+  "name": "Irodori-TTS",
+  "tagline": "Flow-matching Japanese TTS with zero-shot cloning, emoji style cues and automatic duration.",
+  "homepage": "https://github.com/Aratako/Irodori-TTS",
+  "license": "Code MIT. Check each model card for weight licenses.",
+  "languages": ["Japanese"],
+  "reference": {
+    "transcript": "unused",
+    "multi_clip": true,
+    "recommended": "Several clean clips of the same speaker, about 30 s in total",
+    "min_seconds": 3,
+    "max_seconds": 120
+  },
+  "detect": {
+    "name": ["irodori"],
+    "files": ["model.safetensors", "tokenizer/tokenizer_config.json"]
+  },
+  "download": {
+    "allow": ["model.safetensors", "tokenizer/*", "*.md"],
+    "subfolder_allow": ["{sub}/model.safetensors", "{sub}/tokenizer/*", "tokenizer/*", "*.md"]
+  },
+  "suggested": [
+    {"repo": "Aratako/Irodori-TTS-v4.1-Small", "label": "v4.1 Small (0.8B)", "note": "Default. Fast, fp32 on GPU, about 3 GB."},
+    {"repo": "Aratako/Irodori-TTS-v4.1-Small-MF", "label": "v4.1 Small MeanFlow", "note": "Distilled for 4-step sampling. Much faster, slightly less flexible."},
+    {"repo": "Aratako/Irodori-TTS-v4-Large", "label": "v4 Large (3.3B)", "note": "Highest quality. 13 GB download, runs in bf16 on 12 GB GPUs."},
+    {"repo": "Aratako/Irodori-TTS-v4.1-Small-Quantized/int8-weight-only", "label": "v4.1 Small int8", "note": "Pre-quantized subfolder. Lower VRAM."}
+  ],
+  "emoji_palette": [
+    {"emoji": "👂", "label": "囁き", "description": "耳元の音"},
+    {"emoji": "😮‍💨", "label": "吐息", "description": "溜息、寝息"},
+    {"emoji": "⏸️", "label": "間", "description": "沈黙"},
+    {"emoji": "🤭", "label": "笑い", "description": "くすくす、含み笑い"},
+    {"emoji": "🥵", "label": "喘ぎ", "description": "うめき声、唸り声"},
+    {"emoji": "📢", "label": "エコー", "description": "リバーブ"},
+    {"emoji": "😏", "label": "からかう", "description": "甘えるように"},
+    {"emoji": "🥺", "label": "震え声", "description": "自信なさげに"},
+    {"emoji": "🌬️", "label": "息切れ", "description": "荒い息遣い、呼吸音"},
+    {"emoji": "😮", "label": "息をのむ", "description": "Gasp"},
+    {"emoji": "👅", "label": "舐める音", "description": "咀嚼音、水音"},
+    {"emoji": "💋", "label": "リップノイズ", "description": "Lip smack"},
+    {"emoji": "🫶", "label": "優しく", "description": "Tenderly"},
+    {"emoji": "😭", "label": "泣き声", "description": "嗚咽、悲しみ"},
+    {"emoji": "😱", "label": "悲鳴", "description": "叫び、絶叫"},
+    {"emoji": "😪", "label": "眠そう", "description": "気だるげに"},
+    {"emoji": "😴", "label": "寝言", "description": "いびき"},
+    {"emoji": "⏩", "label": "早口", "description": "一気に、急いで"},
+    {"emoji": "📞", "label": "電話越し", "description": "スピーカー越し"},
+    {"emoji": "🐢", "label": "ゆっくり", "description": "Slowly"},
+    {"emoji": "🥤", "label": "飲み込む", "description": "唾を飲む音"},
+    {"emoji": "🤧", "label": "咳・鼻", "description": "咳き込み、鼻すすり"},
+    {"emoji": "😒", "label": "舌打ち", "description": "Tutting"},
+    {"emoji": "😰", "label": "慌てる", "description": "動揺、緊張、どもり"},
+    {"emoji": "😆", "label": "喜び", "description": "嬉しそうに"},
+    {"emoji": "💥", "label": "勢いよく", "description": "力強い勢い"},
+    {"emoji": "😠", "label": "怒り", "description": "不満げ、拗ねる"},
+    {"emoji": "😲", "label": "驚き", "description": "感嘆"},
+    {"emoji": "🥱", "label": "あくび", "description": "Yawn"},
+    {"emoji": "😖", "label": "苦しげ", "description": "Agonizingly"},
+    {"emoji": "😟", "label": "心配", "description": "不安そうに"},
+    {"emoji": "🫣", "label": "照れ", "description": "恥ずかしそうに"},
+    {"emoji": "🙄", "label": "呆れ", "description": "Exasperatedly"},
+    {"emoji": "😊", "label": "楽しげ", "description": "嬉しそうに"},
+    {"emoji": "😎", "label": "得意げ", "description": "自信ありげに"},
+    {"emoji": "👌", "label": "相槌", "description": "頷く音"},
+    {"emoji": "🙏", "label": "懇願", "description": "お願いするように"},
+    {"emoji": "🥴", "label": "酔う", "description": "Drunkenly"},
+    {"emoji": "🎵", "label": "鼻歌", "description": "Humming"},
+    {"emoji": "🤐", "label": "口を塞ぐ", "description": "Muffled"},
+    {"emoji": "😌", "label": "安堵", "description": "満足げに"},
+    {"emoji": "🤔", "label": "疑問", "description": "Questioning"},
+    {"emoji": "💪", "label": "力強く", "description": "力を込めて"},
+    {"emoji": "👃", "label": "嗅ぐ音", "description": "匂いを嗅ぐ音"},
+    {"emoji": "📖", "label": "朗読", "description": "ナレーション"}
+  ],
+  "settings": [
+    {
+      "key": "precision", "label": "Model precision", "type": "select", "scope": "load", "group": "Model", "default": "auto",
+      "options": [
+        {"value": "auto", "label": "Auto", "help": "bf16 when the weights are stored in bf16, are quantized, or would not fit in VRAM as fp32. fp32 otherwise."},
+        {"value": "fp32", "label": "fp32", "help": "Full precision. Reference quality for Small models, needs 4 bytes per parameter of VRAM."},
+        {"value": "bf16", "label": "bf16", "help": "Half the VRAM and usually faster on RTX GPUs. Needed for Large on 12 GB cards."}
+      ],
+      "help": {
+        "summary": "Numeric precision of the diffusion transformer. Changing it reloads the model.",
+        "increase": "fp32 is the most faithful to training but doubles VRAM use.",
+        "decrease": "bf16 halves VRAM and speeds up sampling with a very small quality difference.",
+        "tip": "Keep Auto unless you are comparing quality. Large (3.3B) only fits a 12 GB GPU in bf16."
+      }
+    },
+    {
+      "key": "codec_precision", "label": "Codec precision", "type": "select", "scope": "load", "group": "Model", "default": "fp32",
+      "options": [
+        {"value": "fp32", "label": "fp32", "help": "Recommended. The DACVAE codec is small, so fp32 costs little."},
+        {"value": "bf16", "label": "bf16", "help": "Saves a little VRAM. Can add slight artifacts to encoding and decoding."}
+      ],
+      "help": {
+        "summary": "Precision of the DACVAE codec that encodes the reference and decodes the generated latents into a waveform.",
+        "increase": "fp32 gives the cleanest decode.",
+        "decrease": "bf16 saves a few hundred MB of VRAM.",
+        "tip": "Leave at fp32 unless VRAM is extremely tight."
+      }
+    },
+    {
+      "key": "takes", "label": "Takes", "type": "int", "scope": "generate", "group": "Basic", "default": 1, "min": 1, "max": 8, "step": 1,
+      "help": {
+        "summary": "How many candidates to generate in one batched pass. With Seed -1 every take gets its own random seed. With a fixed seed, take n uses seed + n - 1.",
+        "increase": "More variations to choose from. VRAM use and time grow roughly linearly.",
+        "decrease": "Faster and lighter.",
+        "tip": "Generate 2 to 4 takes and keep the best one. Delivery varies a lot between samples."
+      }
+    },
+    {
+      "key": "seed", "label": "Seed", "type": "seed", "scope": "generate", "group": "Basic", "default": -1,
+      "help": {
+        "summary": "Random seed for the starting noise. -1 picks a new random seed for every take.",
+        "increase": "Any fixed value reproduces the same result with the same model, text, reference and settings.",
+        "decrease": "-1 gives a fresh variation on every run.",
+        "tip": "Each take shows its own seed on the result card. Click it to reproduce that take as Take 1, then tweak other settings with the seed fixed."
+      }
+    },
+    {
+      "key": "num_steps", "label": "Sampling steps", "type": "int", "scope": "generate", "group": "Sampling", "default": 0, "min": 0, "max": 120, "step": 1, "zero_label": "Auto",
+      "help": {
+        "summary": "Number of Euler steps that turn noise into speech latents. 0 uses the checkpoint default (40 for normal models, 4 for MeanFlow).",
+        "increase": "Smoother, more detailed audio up to a point. Time grows linearly with steps.",
+        "decrease": "Faster but can sound grainy or slurred. Combine low values with the Sway schedule.",
+        "tip": "This is the main speed/quality knob. 40 is a good default. Try 8 to 12 with Sway for drafts."
+      }
+    },
+    {
+      "key": "t_schedule_mode", "label": "Timestep schedule", "type": "select", "scope": "generate", "group": "Sampling", "default": "linear",
+      "options": [
+        {"value": "linear", "label": "Linear", "help": "Evenly spaced steps. Best with the default 40 steps."},
+        {"value": "sway", "label": "Sway", "help": "Spends more steps near the noisy start. Keeps quality when you use few steps."}
+      ],
+      "help": {
+        "summary": "How the sampling steps are spread between noise and the final audio.",
+        "increase": "Sway keeps low step counts usable.",
+        "decrease": "Linear is the reference behavior.",
+        "tip": "Use Sway only together with a low step count (6 to 12)."
+      }
+    },
+    {
+      "key": "sway_coeff", "label": "Sway coefficient", "type": "float", "scope": "generate", "group": "Sampling", "default": -1.0, "min": -1.0, "max": 1.0, "step": 0.05,
+      "help": {
+        "summary": "Shape of the Sway schedule. Only used when the timestep schedule is Sway.",
+        "increase": "Values toward +1 move resolution toward the clean end (fine detail).",
+        "decrease": "Values toward -1 move resolution toward the noisy end (overall structure). -1 is the recommended value.",
+        "tip": "Leave at -1 unless you are experimenting."
+      }
+    },
+    {
+      "key": "cfg_scale_speaker", "label": "Speaker guidance", "type": "float", "scope": "generate", "group": "Guidance", "default": 5.0, "min": 0.0, "max": 12.0, "step": 0.25,
+      "help": {
+        "summary": "Classifier-free guidance strength for the reference voice. Controls how hard the model pulls toward the reference speaker.",
+        "increase": "Closer timbre and speaking style to the reference. Too high can exaggerate quirks, add noise from the reference or sound strained.",
+        "decrease": "More natural and stable, but the voice drifts toward a generic speaker. 0 disables speaker guidance.",
+        "tip": "If the clone does not sound like the reference, raise this to 6 or 7 first, then try Speaker K/V scale."
+      }
+    },
+    {
+      "key": "cfg_scale_text", "label": "Text guidance", "type": "float", "scope": "generate", "group": "Guidance", "default": 3.0, "min": 0.0, "max": 10.0, "step": 0.25,
+      "help": {
+        "summary": "Guidance strength for the input text. Controls how strictly pronunciation follows the text.",
+        "increase": "Clearer, more accurate pronunciation. Too high sounds robotic or rushed.",
+        "decrease": "Looser, more relaxed delivery but more mumbling or skipped words.",
+        "tip": "Raise slightly (3.5 to 4.5) if words are slurred or dropped."
+      }
+    },
+    {
+      "key": "caption", "label": "Style caption", "type": "textarea", "scope": "generate", "group": "Guidance", "default": "", "placeholder": "e.g. 落ち着いた声で、ゆっくり優しく話している",
+      "help": {
+        "summary": "Optional natural-language description of the delivery (emotion, pace, situation). Combined with the reference voice on checkpoints that support captions (v4.1 Small and v3 VoiceDesign).",
+        "increase": "A specific caption steers emotion and pacing while the reference keeps the identity.",
+        "decrease": "Leave empty to copy the delivery from the reference audio only.",
+        "tip": "Write it in Japanese. Ignored by checkpoints without caption conditioning (the result card will say so)."
+      }
+    },
+    {
+      "key": "cfg_scale_caption", "label": "Caption guidance", "type": "float", "scope": "generate", "group": "Guidance", "default": 3.0, "min": 0.0, "max": 10.0, "step": 0.25,
+      "help": {
+        "summary": "Guidance strength for the style caption. Only used when a caption is given.",
+        "increase": "The caption's emotion and pace come through more strongly, possibly at the cost of speaker similarity.",
+        "decrease": "The caption becomes a light hint and the reference style dominates.",
+        "tip": "Balance it against Speaker guidance. If the voice changes identity, lower this."
+      }
+    },
+    {
+      "key": "cfg_guidance_mode", "label": "Guidance mode", "type": "select", "scope": "generate", "group": "Guidance", "default": "independent",
+      "options": [
+        {"value": "independent", "label": "Independent", "help": "Each condition gets its own guidance branch. Most flexible, uses the most VRAM and compute."},
+        {"value": "joint", "label": "Joint", "help": "Drops all conditions together. 2x compute, but all enabled guidance scales must be equal."},
+        {"value": "alternating", "label": "Alternating", "help": "Guides one condition per step in rotation. 2x compute, slightly weaker per-condition control."}
+      ],
+      "help": {
+        "summary": "How classifier-free guidance is computed when several conditions (text, speaker, caption) are active.",
+        "increase": "Independent gives separate control of every scale.",
+        "decrease": "Joint or Alternating lower the per-step cost when VRAM or speed matters.",
+        "tip": "Keep Independent. Joint fails if the scales differ."
+      }
+    },
+    {
+      "key": "cfg_min_t", "label": "Guidance start (min t)", "type": "float", "scope": "generate", "group": "Guidance", "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "advanced": true,
+      "help": {
+        "summary": "Guidance is only applied while the timestep t is between min t and max t (t = 1 is pure noise, t = 0 is the final audio).",
+        "increase": "Guidance stops earlier, so the final detail is left to the model. More natural, less adherence.",
+        "decrease": "Guidance stays active until the end. Stronger adherence, more risk of harshness.",
+        "tip": "0.5 is the trained default."
+      }
+    },
+    {
+      "key": "cfg_max_t", "label": "Guidance end (max t)", "type": "float", "scope": "generate", "group": "Guidance", "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05, "advanced": true,
+      "help": {
+        "summary": "Upper timestep bound for guidance. 1.0 means guidance starts at the very first step.",
+        "increase": "1.0 guides the global structure (rhythm, identity) from the beginning.",
+        "decrease": "Lower values skip guidance at the noisiest steps and loosen the overall structure.",
+        "tip": "Leave at 1.0."
+      }
+    },
+    {
+      "key": "speaker_kv_scale", "label": "Speaker K/V scale", "type": "float", "scope": "generate", "group": "Guidance", "default": 0, "min": 0, "max": 3.0, "step": 0.05, "zero_label": "Off", "advanced": true,
+      "help": {
+        "summary": "Experimental. Multiplies the attention keys and values coming from the reference speaker, which strengthens speaker identity without raising guidance.",
+        "increase": "1.1 to 1.5 can noticeably improve similarity. Large values distort the audio.",
+        "decrease": "0 (off) or 1.0 leaves the model unchanged.",
+        "tip": "Try 1.2 when the voice drifts from the reference even with higher Speaker guidance."
+      }
+    },
+    {
+      "key": "speaker_kv_min_t", "label": "Speaker K/V min t", "type": "float", "scope": "generate", "group": "Guidance", "default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05, "advanced": true,
+      "help": {
+        "summary": "Speaker K/V scaling is applied only while t is at or above this value (the early, noisy steps).",
+        "increase": "Closer to 1 limits the effect to the first steps (identity only).",
+        "decrease": "Lower values keep scaling active longer, which affects fine detail and can add artifacts.",
+        "tip": "0.9 is the documented default."
+      }
+    },
+    {
+      "key": "speaker_kv_max_layers", "label": "Speaker K/V layers", "type": "int", "scope": "generate", "group": "Guidance", "default": 0, "min": 0, "max": 64, "step": 1, "zero_label": "All", "advanced": true,
+      "help": {
+        "summary": "Limits Speaker K/V scaling to the first N transformer layers. 0 applies it to all layers.",
+        "increase": "More layers give a stronger effect.",
+        "decrease": "Fewer layers give a gentler, more targeted effect.",
+        "tip": "Only matters when Speaker K/V scale is on."
+      }
+    },
+    {
+      "key": "seconds", "label": "Fixed duration", "type": "float", "scope": "generate", "group": "Duration", "default": 0, "min": 0, "max": 60, "step": 0.5, "unit": "s", "zero_label": "Auto",
+      "help": {
+        "summary": "Exact output length in seconds. 0 lets the built-in duration predictor choose the length.",
+        "increase": "Longer than natural makes speech slow with long pauses or trailing noise.",
+        "decrease": "Shorter than natural makes speech rushed or cut off.",
+        "tip": "Prefer Auto plus Duration scale. Use a fixed length only for timing to video."
+      }
+    },
+    {
+      "key": "duration_scale", "label": "Duration scale", "type": "float", "scope": "generate", "group": "Duration", "default": 1.0, "min": 0.5, "max": 2.0, "step": 0.05, "unit": "x",
+      "help": {
+        "summary": "Multiplies the predicted duration. A simple way to control speaking rate.",
+        "increase": "Above 1 gives slower, more spacious speech.",
+        "decrease": "Below 1 gives faster speech. Too low drops syllables.",
+        "tip": "0.9 to 1.15 sounds natural. If the end of a sentence is cut off, raise it to 1.1."
+      }
+    },
+    {
+      "key": "max_seconds", "label": "Max duration", "type": "float", "scope": "generate", "group": "Duration", "default": 30, "min": 5, "max": 60, "step": 1, "unit": "s",
+      "help": {
+        "summary": "Upper limit on the predicted duration of one generation.",
+        "increase": "Allows longer passages in a single take. Models were trained on short utterances, so very long outputs get less stable.",
+        "decrease": "Keeps outputs short and stable.",
+        "tip": "For long text, generate sentence by sentence instead of raising this."
+      }
+    },
+    {
+      "key": "truncation_factor", "label": "Noise truncation", "type": "float", "scope": "generate", "group": "Sampling", "default": 0, "min": 0, "max": 1.0, "step": 0.05, "zero_label": "Off", "advanced": true,
+      "help": {
+        "summary": "Scales the starting noise. Values below 1 pull samples toward the average.",
+        "increase": "Closer to 1 (or off) keeps full variety and expressiveness.",
+        "decrease": "0.8 to 0.9 gives more consistent, safer takes with less expression.",
+        "tip": "Useful when takes are unstable. 0 disables it."
+      }
+    },
+    {
+      "key": "rescale_k", "label": "Score rescale k", "type": "float", "scope": "generate", "group": "Sampling", "default": 0, "min": 0, "max": 5, "step": 0.05, "zero_label": "Off", "advanced": true,
+      "help": {
+        "summary": "Temporal score rescaling strength. Must be set together with Score rescale sigma, otherwise both are ignored.",
+        "increase": "Stronger rescaling changes the sharpness of the result.",
+        "decrease": "0 disables the feature.",
+        "tip": "Experimental. Leave off unless you know you need it."
+      }
+    },
+    {
+      "key": "rescale_sigma", "label": "Score rescale sigma", "type": "float", "scope": "generate", "group": "Sampling", "default": 0, "min": 0, "max": 5, "step": 0.05, "zero_label": "Off", "advanced": true,
+      "help": {
+        "summary": "Noise level parameter for temporal score rescaling. Pairs with Score rescale k.",
+        "increase": "Applies the rescaling over a wider noise range.",
+        "decrease": "0 disables the feature.",
+        "tip": "Experimental."
+      }
+    },
+    {
+      "key": "ref_normalize", "label": "Normalize reference loudness", "type": "bool", "scope": "generate", "group": "Reference", "default": true,
+      "help": {
+        "summary": "Normalizes each reference clip to a target loudness before encoding, as was done when the codec was trained.",
+        "increase": "On is recommended. Quiet or loud recordings are handled consistently.",
+        "decrease": "Off keeps the raw level, which can make the clone too quiet, too loud or noisy.",
+        "tip": "Keep on."
+      }
+    },
+    {
+      "key": "ref_normalize_db", "label": "Reference loudness target", "type": "float", "scope": "generate", "group": "Reference", "default": -16.0, "min": -30.0, "max": -6.0, "step": 0.5, "unit": "dB", "advanced": true,
+      "help": {
+        "summary": "Loudness the reference is normalized to.",
+        "increase": "Louder reference level.",
+        "decrease": "Quieter reference level.",
+        "tip": "-16 dB matches training. Changing it rarely helps."
+      }
+    },
+    {
+      "key": "max_ref_seconds", "label": "Reference length cap", "type": "float", "scope": "generate", "group": "Reference", "default": 0, "min": 0, "max": 180, "step": 1, "unit": "s", "zero_label": "Model default",
+      "help": {
+        "summary": "Maximum combined reference length. Clips are joined in order and cut at this length. 0 uses the checkpoint value (120 s for v4).",
+        "increase": "Longer references add more speaker evidence, with diminishing returns after about 30 s.",
+        "decrease": "Shorter references are faster to process but capture less of the voice.",
+        "tip": "Clip order matters. Put your best clip first."
+      }
+    },
+    {
+      "key": "trim_tail", "label": "Trim silent tail", "type": "bool", "scope": "generate", "group": "Advanced", "default": true,
+      "help": {
+        "summary": "Cuts trailing near-silent latent frames after the speech ends.",
+        "increase": "On removes dead air at the end.",
+        "decrease": "Off keeps the full predicted length. Turn it off if the last syllable gets clipped.",
+        "tip": "Mostly matters for older v2 checkpoints."
+      }
+    },
+    {
+      "key": "decode_mode", "label": "Decode mode", "type": "select", "scope": "generate", "group": "Advanced", "default": "sequential",
+      "options": [
+        {"value": "sequential", "label": "Sequential", "help": "Decodes takes one at a time. Lowest VRAM."},
+        {"value": "batch", "label": "Batch", "help": "Decodes all takes together. Faster with several takes, more VRAM."}
+      ],
+      "help": {
+        "summary": "How multiple takes are decoded from latents into audio.",
+        "increase": "Batch is faster for 2 or more takes.",
+        "decrease": "Sequential avoids VRAM spikes.",
+        "tip": "No effect on quality."
+      }
+    },
+    {
+      "key": "context_kv_cache", "label": "Context K/V cache", "type": "bool", "scope": "generate", "group": "Advanced", "default": true, "advanced": true,
+      "help": {
+        "summary": "Precomputes attention keys and values for the text, speaker and caption once per generation.",
+        "increase": "On is faster.",
+        "decrease": "Off only for debugging or numerical comparisons.",
+        "tip": "Keep on."
+      }
+    }
+  ]
+}

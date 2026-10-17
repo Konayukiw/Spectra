@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spectra · Voice Cloning Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='7' fill='%23f08a3c'/%3E%3Cg stroke='%23f08a3c' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M16 2v4M16 26v4M2 16h4M26 16h4M6 6l2.8 2.8M23.2 23.2 26 26M6 26l2.8-2.8M23.2 8.8 26 6'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <strong>Spectra</strong>
+        <span>Voice Cloning Studio</span>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="studio">Studio</button>
+      <button class="tab" role="tab" data-tab="voices">Voices</button>
+      <button class="tab" role="tab" data-tab="history">History</button>
+      <button class="tab" role="tab" data-tab="models">Models</button>
+    </nav>
+    <div class="top-actions">
+      <div class="pill" id="worker-pill" data-help="worker" tabindex="0"><span class="dot"></span><span class="pill-text">Idle</span></div>
+      <div class="pill" id="gpu-pill" data-help="gpu" tabindex="0"><span class="meter"><span></span></span><span class="pill-text">GPU</span></div>
+      <button class="icon-btn" id="logs-btn" title="Logs" aria-label="Show logs"></button>
+      <button class="icon-btn" id="theme-btn" title="Theme" aria-label="Switch theme"></button>
+    </div>
+  </header>
+
+  <main>
+    <section class="view" id="view-studio" data-view="studio">
+      <div class="studio">
+        <div class="studio-main">
+          <article class="card" id="model-card">
+            <div class="card-head">
+              <h2>Model</h2>
+              <div class="card-actions">
+                <button class="btn ghost small" id="unload-btn" data-help="unload">Unload</button>
+                <button class="btn small" id="load-btn" data-help="load">Load</button>
+              </div>
+            </div>
+            <div class="field">
+              <select id="model-select" data-help="model"></select>
+            </div>
+            <div class="model-meta" id="model-meta"></div>
+          </article>
+
+          <article class="card" id="ref-card">
+            <div class="card-head">
+              <h2>Reference voice <span class="badge accent">required</span></h2>
+              <div class="card-actions">
+                <select id="voice-select" class="compact" data-help="voiceLibrary"></select>
+                <button class="btn ghost small" id="save-voice-btn" data-help="saveVoice">Save as voice</button>
+                <button class="btn ghost small" id="clear-clips-btn" data-help="clearClips">Clear</button>
+              </div>
+            </div>
+            <div class="dropzone" id="dropzone" tabindex="0" data-help="reference">
+              <input type="file" id="file-input" accept="audio/*,video/*,.wav,.mp3,.flac,.ogg,.opus,.m4a,.aac,.webm,.mp4,.mkv,.mov,.wma" multiple hidden>
+              <div class="dz-icon" aria-hidden="true"></div>
+              <div class="dz-text">
+                <strong>Drop audio files here</strong>
+                <span>or <button class="linklike" id="browse-btn" type="button">browse</button> · any format ffmpeg can read</span>
+              </div>
+              <button class="btn ghost small rec-btn" id="record-btn" type="button" data-help="record"></button>
+            </div>
+            <ul class="clip-list" id="clip-list"></ul>
+            <div class="ref-summary" id="ref-summary"></div>
+          </article>
+
+          <article class="card" id="text-card">
+            <div class="card-head">
+              <h2>Text</h2>
+              <div class="card-actions">
+                <span class="counter" id="text-counter">0</span>
+                <button class="btn ghost small emoji-btn" id="emoji-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="emoji-pop" title="Insert an emoji cue at the cursor" hidden><span class="emoji-glyph" aria-hidden="true">😊</span> Emoji</button>
+              </div>
+            </div>
+            <div class="text-box">
+              <textarea id="text-input" rows="5" spellcheck="false" data-help="text" placeholder="Type what the cloned voice should say."></textarea>
+              <div class="emoji-pop" id="emoji-pop" role="dialog" aria-label="Emoji cues" hidden>
+                <div class="emoji-pop-head">
+                  <div><strong>Emoji cues</strong><span>Click to insert at the cursor</span></div>
+                  <button class="icon-btn plain" id="emoji-close" type="button" aria-label="Close emoji cues"></button>
+                </div>
+                <div class="emoji-grid" id="emoji-grid"></div>
+                <div class="emoji-detail" id="emoji-detail"></div>
+              </div>
+            </div>
+            <div class="hint" id="text-hint"></div>
+          </article>
+
+          <div class="generate-bar card">
+            <div class="gen-left">
+              <button class="btn primary big" id="generate-btn" data-help="generate"></button>
+              <button class="btn ghost" id="cancel-btn" hidden>Cancel</button>
+            </div>
+            <div class="gen-status">
+              <div class="gen-reason" id="gen-reason"></div>
+              <div class="progress" id="gen-progress" hidden><div class="bar"></div></div>
+              <div class="gen-stage" id="gen-stage"></div>
+            </div>
+          </div>
+
+          <section id="results"></section>
+        </div>
+
+        <aside class="studio-side">
+          <div class="card settings-card">
+            <div class="card-head">
+              <h2>Settings</h2>
+              <div class="card-actions">
+                <label class="switch small" data-help="advanced"><input type="checkbox" id="advanced-toggle"><span></span>Advanced</label>
+                <button class="btn ghost small" id="reset-settings-btn" data-help="reset">Reset</button>
+              </div>
+            </div>
+            <div id="settings"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="view" id="view-voices" data-view="voices">
+      <div class="page-head">
+        <div>
+          <h1>Voice library</h1>
+          <p class="muted">Saved reference sets. Use one in the Studio or edit its clips and transcripts here.</p>
+        </div>
+      </div>
+      <div class="voice-grid" id="voice-grid"></div>
+    </section>
+
+    <section class="view" id="view-history" data-view="history">
+      <div class="page-head">
+        <div>
+          <h1>History</h1>
+          <p class="muted">Every generation is kept with its takes, reference clips and settings.</p>
+        </div>
+        <input type="search" id="history-search" placeholder="Search text, voice or model">
+      </div>
+      <div id="history-list" class="history-list"></div>
+      <div class="center"><button class="btn ghost" id="history-more" hidden>Load more</button></div>
+    </section>
+
+    <section class="view" id="view-models" data-view="models">
+      <div class="page-head">
+        <div>
+          <h1>Models</h1>
+          <p class="muted">Download checkpoints straight from Hugging Face into <code>%USERPROFILE%\.spectra\models</code>. Each engine runs in its own Python environment.</p>
+        </div>
+      </div>
+      <div class="models-layout">
+        <div>
+          <article class="card">
+            <div class="card-head"><h2>Download from Hugging Face</h2></div>
+            <form class="dl-form" id="dl-form">
+              <input type="text" id="dl-link" placeholder="https://huggingface.co/owner/model  or  owner/model[/subfolder]" data-help="hfLink" autocomplete="off">
+              <select id="dl-engine" class="compact" data-help="hfEngine"></select>
+              <button class="btn" type="submit" id="dl-check">Check</button>
+            </form>
+            <div id="dl-preview"></div>
+            <div class="suggested" id="suggested"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Installed models</h2></div>
+            <div id="model-table"></div>
+          </article>
+        </div>
+        <div>
+          <article class="card">
+            <div class="card-head"><h2>Activity</h2></div>
+            <div id="job-list" class="job-list"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Engines</h2></div>
+            <div id="engine-list" class="engine-list"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Transcription</h2></div>
+            <div id="asr-panel" class="engine-list"></div>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="drawer" id="log-drawer" hidden>
+    <div class="drawer-head">
+      <strong>Logs</strong>
+      <div class="card-actions">
+        <label class="switch small"><input type="checkbox" id="log-follow" checked><span></span>Follow</label>
+        <button class="btn ghost small" id="log-clear">Clear view</button>
+        <button class="icon-btn" id="log-close" aria-label="Close logs"></button>
+      </div>
+    </div>
+    <pre id="log-body"></pre>
+  </div>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-card">
+      <h3 id="modal-title"></h3>
+      <div id="modal-body"></div>
+      <div class="modal-actions" id="modal-actions"></div>
+    </div>
+  </div>
+
+  <div class="help-pop" id="help-pop" role="tooltip" hidden><div class="help-pop-body" id="help-pop-body"></div></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

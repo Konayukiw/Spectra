@@ -1,0 +1,29 @@
+[project]
+name = "spectra-engine-irodori"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "irodori-tts",
+    "dacvae",
+    "silentcipher",
+    "torch==2.10.*",
+    "torchaudio==2.10.*",
+    "torchcodec>=0.10,<0.11",
+    "torchao>=0.16,<0.17",
+    "soundfile>=0.12",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+irodori-tts = { git = "https://github.com/Aratako/Irodori-TTS", rev = "89f9d8fbd4d51ea019867ee1197725ede1df13c5" }
+dacvae = { git = "https://github.com/facebookresearch/dacvae", rev = "414c20785fc3a28373073ea8ef7a1316eeeaca6e" }
+silentcipher = { git = "https://github.com/SesameAILabs/silentcipher.git", rev = "d46d7d0893a583d8968ab3a6626e2289faec9152" }
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

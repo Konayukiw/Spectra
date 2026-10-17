@@ -1,0 +1,201 @@
+{
+  "id": "qwen3tts",
+  "order": 2,
+  "name": "Qwen3-TTS",
+  "tagline": "Alibaba Qwen multilingual codec-LM TTS. Clones from a short reference with or without its transcript.",
+  "homepage": "https://github.com/QwenLM/Qwen3-TTS",
+  "license": "Apache-2.0",
+  "languages": ["English", "Chinese", "Korean", "German", "French", "Russian", "Portuguese", "Spanish", "Italian"],
+  "reference": {
+    "transcript": "recommended",
+    "multi_clip": false,
+    "recommended": "One clean clip of 5 to 15 s with its exact transcript",
+    "min_seconds": 3,
+    "max_seconds": 30
+  },
+  "detect": {
+    "name": ["qwen3-tts", "qwen3_tts"],
+    "config": {"file": "config.json", "match": {"model_type": "qwen3_tts"}}
+  },
+  "download": {
+    "allow": ["*"],
+    "subfolder_allow": ["{sub}/*"]
+  },
+  "suggested": [
+    {"repo": "Qwen/Qwen3-TTS-12Hz-1.7B-Base", "label": "1.7B Base", "note": "Best similarity. About 4.5 GB."},
+    {"repo": "Qwen/Qwen3-TTS-12Hz-0.6B-Base", "label": "0.6B Base", "note": "Lighter and faster. About 2.5 GB."}
+  ],
+  "settings": [
+    {
+      "key": "dtype", "label": "Model dtype", "type": "select", "scope": "load", "group": "Model", "default": "bf16",
+      "options": [
+        {"value": "bf16", "label": "bf16", "help": "Recommended on RTX GPUs. Half the VRAM of fp32."},
+        {"value": "fp16", "label": "fp16", "help": "For GPUs without bf16 support. Slightly higher risk of overflow."},
+        {"value": "fp32", "label": "fp32", "help": "Full precision. Twice the VRAM and slower. Forced on CPU."}
+      ],
+      "help": {
+        "summary": "Weight and compute precision. Changing it reloads the model.",
+        "increase": "fp32 is the most precise but uses twice the memory.",
+        "decrease": "bf16 is the reference setting used by the Qwen team.",
+        "tip": "Keep bf16."
+      }
+    },
+    {
+      "key": "attention", "label": "Attention kernel", "type": "select", "scope": "load", "group": "Model", "default": "sdpa",
+      "options": [
+        {"value": "sdpa", "label": "SDPA", "help": "PyTorch scaled-dot-product attention. Fast and available everywhere."},
+        {"value": "eager", "label": "Eager", "help": "Plain implementation. Slowest, only for debugging."},
+        {"value": "flash_attention_2", "label": "FlashAttention 2", "help": "Fastest and lowest memory, but needs the flash-attn package, which is usually not installed on Windows."}
+      ],
+      "help": {
+        "summary": "Attention implementation used by the language model. Changing it reloads the model.",
+        "increase": "FlashAttention 2 saves VRAM on long inputs if it is installed.",
+        "decrease": "Eager is the fallback when other kernels fail.",
+        "tip": "SDPA is the right choice on Windows."
+      }
+    },
+    {
+      "key": "language", "label": "Language", "type": "select", "scope": "generate", "group": "Basic", "default": "English",
+      "options": [
+        {"value": "Auto", "label": "Auto detect"},
+        {"value": "English", "label": "English"},
+        {"value": "Chinese", "label": "Chinese"},
+        {"value": "Korean", "label": "Korean"},
+        {"value": "German", "label": "German"},
+        {"value": "French", "label": "French"},
+        {"value": "Russian", "label": "Russian"},
+        {"value": "Portuguese", "label": "Portuguese"},
+        {"value": "Spanish", "label": "Spanish"},
+        {"value": "Italian", "label": "Italian"}
+      ],
+      "help": {
+        "summary": "Language of the text to speak. It selects the language token the model is conditioned on.",
+        "increase": "Setting the exact language improves pronunciation and prevents accent drift.",
+        "decrease": "Auto detects it from the text, which can fail on short or mixed-language text.",
+        "tip": "Set English for English text. Japanese is handled by Irodori-TTS. The reference can be in another language (cross-lingual cloning)."
+      }
+    },
+    {
+      "key": "clone_mode", "label": "Clone mode", "type": "select", "scope": "generate", "group": "Basic", "default": "auto",
+      "options": [
+        {"value": "auto", "label": "Auto", "help": "ICL when every clip has a transcript, otherwise speaker embedding only."},
+        {"value": "icl", "label": "ICL (with transcript)", "help": "The model reads the reference audio tokens and their transcript, then continues in the same voice. Best similarity, copies prosody and recording character."},
+        {"value": "xvector", "label": "Speaker embedding only", "help": "Uses only a speaker embedding (x-vector). No transcript needed, but similarity and naturalness are lower."}
+      ],
+      "help": {
+        "summary": "How the reference voice is given to the model.",
+        "increase": "ICL clones timbre, accent and speaking style closely but needs an exact transcript.",
+        "decrease": "Speaker embedding only is quick to set up and robust to noisy references, but sounds less like the target.",
+        "tip": "A wrong transcript hurts ICL badly. Type exactly what is said in the reference."
+      }
+    },
+    {
+      "key": "takes", "label": "Takes", "type": "int", "scope": "generate", "group": "Basic", "default": 1, "min": 1, "max": 8, "step": 1,
+      "help": {
+        "summary": "How many takes to generate one after another. With Seed -1 every take gets its own random seed. With a fixed seed, take n uses seed + n - 1. Every take is reproducible on its own.",
+        "increase": "More variations. Time grows linearly.",
+        "decrease": "Faster.",
+        "tip": "Codec-LM models vary a lot between samples. 2 to 3 takes is a good habit."
+      }
+    },
+    {
+      "key": "seed", "label": "Seed", "type": "seed", "scope": "generate", "group": "Basic", "default": -1,
+      "help": {
+        "summary": "Random seed for sampling. -1 picks a new random seed for every take.",
+        "increase": "A fixed value reproduces the same take with the same inputs and settings.",
+        "decrease": "-1 gives a fresh variation every run.",
+        "tip": "Copy the seed of a good take from the result card to keep it while you tune other settings."
+      }
+    },
+    {
+      "key": "temperature", "label": "Temperature", "type": "float", "scope": "generate", "group": "Sampling", "default": 0.9, "min": 0.1, "max": 1.5, "step": 0.05,
+      "help": {
+        "summary": "Randomness of the main (talker) token sampling, which decides rhythm, intonation and content timing.",
+        "increase": "More expressive and varied, but more risk of slurring, repeats or strange pauses.",
+        "decrease": "Flatter and more predictable. Too low can loop or sound monotone.",
+        "tip": "0.7 to 0.9 for narration. Lower it if takes are unstable."
+      }
+    },
+    {
+      "key": "top_k", "label": "Top-k", "type": "int", "scope": "generate", "group": "Sampling", "default": 50, "min": 1, "max": 200, "step": 1,
+      "help": {
+        "summary": "Only the k most likely tokens are considered at each step.",
+        "increase": "Allows rarer choices, which adds variety and risk.",
+        "decrease": "Restricts to safe choices. Very low values sound robotic.",
+        "tip": "Usually adjust Temperature instead."
+      }
+    },
+    {
+      "key": "top_p", "label": "Top-p", "type": "float", "scope": "generate", "group": "Sampling", "default": 1.0, "min": 0.1, "max": 1.0, "step": 0.05,
+      "help": {
+        "summary": "Nucleus sampling. Keeps the smallest set of tokens whose probabilities add up to p.",
+        "increase": "1.0 disables the filter.",
+        "decrease": "0.8 to 0.95 trims unlikely tokens and makes takes more stable.",
+        "tip": "Lower top-p is a gentle alternative to lowering temperature."
+      }
+    },
+    {
+      "key": "repetition_penalty", "label": "Repetition penalty", "type": "float", "scope": "generate", "group": "Sampling", "default": 1.05, "min": 1.0, "max": 2.0, "step": 0.01,
+      "help": {
+        "summary": "Penalizes codec tokens that were already generated.",
+        "increase": "Prevents stuck loops and endless syllables. Too high damages natural sustained sounds.",
+        "decrease": "1.0 disables it. More natural but loops can appear.",
+        "tip": "Raise to 1.1 if a take loops or never stops."
+      }
+    },
+    {
+      "key": "max_new_tokens", "label": "Max new tokens", "type": "int", "scope": "generate", "group": "Sampling", "default": 0, "min": 0, "max": 8192, "step": 64, "zero_label": "Model default",
+      "help": {
+        "summary": "Upper limit of generated codec frames. The 12 Hz codec makes about 12.5 frames per second of audio. 0 uses the checkpoint value.",
+        "increase": "Allows longer outputs.",
+        "decrease": "Caps runaway generations. Too low cuts the speech off.",
+        "tip": "1024 is about 80 s of audio, which is plenty for one paragraph."
+      }
+    },
+    {
+      "key": "do_sample", "label": "Sampling (talker)", "type": "bool", "scope": "generate", "group": "Advanced", "default": true, "advanced": true,
+      "help": {
+        "summary": "Whether the main token stream is sampled. Off means greedy decoding.",
+        "increase": "On is required for natural speech.",
+        "decrease": "Greedy decoding is deterministic but often repetitive or flat.",
+        "tip": "Keep on."
+      }
+    },
+    {
+      "key": "subtalker_dosample", "label": "Sampling (sub-talker)", "type": "bool", "scope": "generate", "group": "Advanced", "default": true, "advanced": true,
+      "help": {
+        "summary": "Whether the sub-talker, which fills in the fine acoustic codebooks of every frame, samples or decodes greedily.",
+        "increase": "On gives richer acoustic detail.",
+        "decrease": "Off can sound buzzy or metallic.",
+        "tip": "Keep on."
+      }
+    },
+    {
+      "key": "subtalker_temperature", "label": "Sub-talker temperature", "type": "float", "scope": "generate", "group": "Advanced", "default": 0.9, "min": 0.1, "max": 1.5, "step": 0.05, "advanced": true,
+      "help": {
+        "summary": "Randomness of the fine acoustic codebooks (timbre detail, breath, texture).",
+        "increase": "More texture and breathiness, but more noise.",
+        "decrease": "Cleaner but can sound dull or muffled.",
+        "tip": "Change in small steps. 0.7 to 0.9 is safe."
+      }
+    },
+    {
+      "key": "subtalker_top_k", "label": "Sub-talker top-k", "type": "int", "scope": "generate", "group": "Advanced", "default": 50, "min": 1, "max": 200, "step": 1, "advanced": true,
+      "help": {
+        "summary": "Top-k filter for the fine acoustic codebooks.",
+        "increase": "More acoustic variety.",
+        "decrease": "Cleaner, less detailed timbre.",
+        "tip": "Rarely needs changing."
+      }
+    },
+    {
+      "key": "subtalker_top_p", "label": "Sub-talker top-p", "type": "float", "scope": "generate", "group": "Advanced", "default": 1.0, "min": 0.1, "max": 1.0, "step": 0.05, "advanced": true,
+      "help": {
+        "summary": "Nucleus filter for the fine acoustic codebooks.",
+        "increase": "1.0 disables the filter.",
+        "decrease": "Lower values suppress unlikely acoustic tokens, which can remove crackles.",
+        "tip": "Try 0.9 if you hear crackling."
+      }
+    }
+  ]
+}
