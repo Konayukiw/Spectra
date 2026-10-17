@@ -94,7 +94,7 @@ To download a model again, delete it in **Models > Installed models** first.
 
 ## Notes
 
-- In line with the upstream implementation, Irodori-TTS embeds a SilentCipher digital watermark into the generated audio.
+- Irodori-TTS embeds the SilentCipher digital watermark used by the upstream implementation. Turn on `Disable SilentCipher watermark` (Studio > Advanced) to save takes without it.
 - Please ensure you have a right from the individual before cloning their voice.
 - `Aratako/Irodori-TTS-v4-Large` is open weight and licensed under MIT, but [**Gemma Terms of Use**](https://ai.google.dev/gemma/terms) is applied for the part of the model. Read the docs before using the model.
 

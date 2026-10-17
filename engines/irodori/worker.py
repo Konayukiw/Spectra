@@ -387,6 +387,7 @@ class IrodoriEngine(mw.Engine):
         normalize = bool(s.get("ref_normalize", True))
         normalize_db = float(s.get("ref_normalize_db", -16.0)) if normalize else None
         ensure_max = True
+        watermark = not bool(s.get("disable_watermark", False))
         progress("Encoding reference audio")
         latents = [self._reference_latent(ref["path"], normalize_db, ensure_max) for ref in references]
 
@@ -439,14 +440,16 @@ class IrodoriEngine(mw.Engine):
         parts, part_seconds, plan_messages = self._plan(text, seconds, base)
         plan_seconds = time.perf_counter() - started
         if len(parts) < 2:
-            result = self._sample(rt.SamplingRequest(text=text, seconds=seconds, seed=seeds[0], **base), seeds, progress, "", 0.05, 0.95)
+            result = self._sample(rt.SamplingRequest(text=text, seconds=seconds, seed=seeds[0], **base), seeds, progress, "", 0.05, 0.95, watermark=watermark)
             sample_rate = result.sample_rate
             audios = [audio.detach().float().cpu().numpy().reshape(-1) for audio in result.audios]
             messages = [m for m in result.messages if m.startswith(_KEPT_MESSAGES)]
+            if not watermark:
+                messages = [m for m in messages if not m.startswith(_WATERMARK_WARNING)]
             timings = {name: round(sec, 3) for name, sec in result.stage_timings}
             used_seed = result.used_seed
         else:
-            audios, sample_rate, messages, timings = self._synthesize_parts(parts, part_seconds, base, seeds, progress)
+            audios, sample_rate, messages, timings = self._synthesize_parts(parts, part_seconds, base, seeds, progress, watermark)
             messages = plan_messages + messages
             timings["plan_parts"] = round(plan_seconds, 3)
             used_seed = seeds[0]
@@ -560,7 +563,7 @@ class IrodoriEngine(mw.Engine):
         summary = ", ".join(f"{value:.0f}" for value in lengths)
         return parts, lengths, [f"info: fixed duration {seconds:.1f} s was spread over {len(parts)} parts ({summary} s)."]
 
-    def _sample(self, req, seeds: list[int], progress: mw.Progress, label: str, low: float, high: float):
+    def _sample(self, req, seeds: list[int], progress: mw.Progress, label: str, low: float, high: float, watermark: bool = True):
         is_meanflow = self.runtime.model_cfg.flow_parameterization == "meanflow"
         total_steps = req.num_steps or (4 if is_meanflow else 40)
         prefix = f"{label}: " if label else ""
@@ -577,6 +580,8 @@ class IrodoriEngine(mw.Engine):
             return original_forward(*args, **kwargs)
 
         def on_log(message: str) -> None:
+            if not watermark and message.startswith(_WATERMARK_WARNING):
+                return
             mw.log(message)
             if message.startswith("[runtime] "):
                 stage = message[len("[runtime] "):].split(":")[0].split(" (")[0]
@@ -585,18 +590,23 @@ class IrodoriEngine(mw.Engine):
 
         mw.log(f"[spectra] {prefix}take seeds: {', '.join(map(str, seeds))}")
         noise = _PerTakeNoise(seeds)
+        watermarker = self.runtime.watermarker
+        backend = watermarker.model
         model.forward_with_encoded_conditions = tracked_forward
         rt_rf.torch = rt_meanflow.torch = noise
+        if not watermark:
+            watermarker.model = None
         try:
             result = self.runtime.synthesize(req, log_fn=on_log)
         finally:
             model.forward_with_encoded_conditions = original_forward
             rt_rf.torch = rt_meanflow.torch = torch
+            watermarker.model = backend
         if not noise.used:
             raise RuntimeError("Per-take seeding did not reach the Irodori sampler. The irodori-tts package may have changed.")
         return result
 
-    def _synthesize_parts(self, parts: list[str], part_seconds: list[float | None], base: dict, seeds: list[int], progress: mw.Progress):
+    def _synthesize_parts(self, parts: list[str], part_seconds: list[float | None], base: dict, seeds: list[int], progress: mw.Progress, watermark: bool):
         watermarker = self.runtime.watermarker
         backend = watermarker.model
         weights = np.cumsum([0] + [max(len(part), 1) for part in parts]) / max(sum(len(part) for part in parts), 1)
@@ -612,7 +622,7 @@ class IrodoriEngine(mw.Engine):
                 low = 0.05 + 0.9 * float(weights[index])
                 high = 0.05 + 0.9 * float(weights[index + 1])
                 mw.log(f"[spectra] {label}: {part}")
-                result = self._sample(rt.SamplingRequest(text=part, seconds=seconds, seed=part_seeds[0], **base), part_seeds, progress, label, low, high)
+                result = self._sample(rt.SamplingRequest(text=part, seconds=seconds, seed=part_seeds[0], **base), part_seeds, progress, label, low, high, watermark=False)
                 sample_rate = result.sample_rate
                 for take, audio in enumerate(result.audios):
                     collected[take].append(audio.detach().float().cpu().numpy().reshape(-1))
@@ -628,13 +638,13 @@ class IrodoriEngine(mw.Engine):
         scales = [_pause_scale(part) for part in parts[:-1]]
         joined = [_join_parts(pieces, scales, sample_rate) for pieces in collected]
         timings["join_parts"] = time.perf_counter() - started
-        if watermarker.ready:
+        audios = [audio for audio, _ in joined]
+        if watermark and watermarker.ready:
             progress("Watermarking", 0.97)
             started = time.perf_counter()
             audios = [self._watermark_joined(audio, sample_rate, cuts) for audio, cuts in joined]
             timings["silentcipher_watermark"] = time.perf_counter() - started
-        else:
-            audios = [audio for audio, _ in joined]
+        elif watermark:
             messages.append(f"{_WATERMARK_WARNING}, so the audio was not watermarked.")
         return audios, sample_rate, messages, {name: round(sec, 3) for name, sec in timings.items()}
 

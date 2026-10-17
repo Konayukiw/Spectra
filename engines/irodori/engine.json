@@ -337,6 +337,15 @@
       }
     },
     {
+      "key": "disable_watermark", "label": "Disable SilentCipher watermark", "type": "bool", "scope": "generate", "group": "Advanced", "default": false,
+      "help": {
+        "summary": "Upstream Irodori-TTS embeds a SilentCipher digital watermark in every waveform it returns. Turning this on skips that step and saves takes exactly as the model produced them.",
+        "increase": "On generates and saves the audio without the watermark payload. Nothing else about generation changes.",
+        "decrease": "Off keeps the upstream behavior: every take carries the SilentCipher mark. This is the default.",
+        "tip": "Leave off unless you need unmarked audio. The mark is near-inaudible and survives re-encoding."
+      }
+    },
+    {
       "key": "decode_mode", "label": "Decode mode", "type": "select", "scope": "generate", "group": "Advanced", "default": "sequential",
       "options": [
         {"value": "sequential", "label": "Sequential", "help": "Decodes takes one at a time. Lowest VRAM."},
